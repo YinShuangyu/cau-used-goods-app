@@ -16,3 +16,8 @@ type FavoriteDetail struct {
 	ProductImage   *string `json:"productImage,omitempty"`
 	SellerNickname *string `json:"sellerNickname,omitempty"`
 }
+
+type ProductSeller struct {
+	ID       uint64 `json:"id"`
+	SellerID uint64 `json:"sellerId"`
+}

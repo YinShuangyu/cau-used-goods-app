@@ -1,6 +1,9 @@
 package favorite
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 type Service struct {
 	repo *Repository
@@ -11,6 +14,16 @@ func NewService(repo *Repository) *Service {
 }
 
 func (s *Service) Add(ctx context.Context, userID, productID uint64) error {
+	product, err := s.repo.GetProductSellerID(ctx, productID)
+	if err != nil {
+		return err
+	}
+	if product == nil {
+		return fmt.Errorf("product not found")
+	}
+	if product.SellerID == userID {
+		return fmt.Errorf("cannot favorite your own product")
+	}
 	return s.repo.Add(ctx, userID, productID)
 }
 

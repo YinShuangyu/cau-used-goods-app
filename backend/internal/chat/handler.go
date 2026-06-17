@@ -157,6 +157,27 @@ func (h *Handler) MarkRead(c *gin.Context) {
 	})
 }
 
+func (h *Handler) GetConversationProduct(c *gin.Context) {
+	userID, ok := middleware.CurrentUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
+		return
+	}
+
+	conversationID, err := parseConversationID(c)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid conversation id")
+		return
+	}
+
+	product, err := h.service.GetConversationProduct(c.Request.Context(), conversationID, userID)
+	if err != nil {
+		writeChatError(c, err)
+		return
+	}
+	response.Success(c, product)
+}
+
 func parseConversationID(c *gin.Context) (uint64, error) {
 	return strconv.ParseUint(c.Param("id"), 10, 64)
 }

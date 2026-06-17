@@ -14,6 +14,18 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+func (r *Repository) GetProductSellerID(ctx context.Context, productID uint64) (*ProductSeller, error) {
+	query := `SELECT id, seller_id FROM products WHERE id = ? AND is_deleted = 0`
+	var item ProductSeller
+	if err := r.db.QueryRowContext(ctx, query, productID).Scan(&item.ID, &item.SellerID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get product seller: %w", err)
+	}
+	return &item, nil
+}
+
 func (r *Repository) Add(ctx context.Context, userID, productID uint64) error {
 	query := `
 		INSERT INTO favorites (user_id, product_id)

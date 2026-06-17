@@ -271,6 +271,47 @@ func (r *Repository) MarkRead(ctx context.Context, conversation *Conversation, u
 	return affected, nil
 }
 
+func (r *Repository) GetConversationProduct(ctx context.Context, productID uint64) (*ConversationProduct, error) {
+	query := `
+		SELECT p.id, p.title, p.price, p.status, p.seller_id
+		FROM products p
+		WHERE p.id = ? AND p.is_deleted = 0
+	`
+	var item ConversationProduct
+	if err := r.db.QueryRowContext(ctx, query, productID).Scan(
+		&item.ID, &item.Title, &item.Price, &item.Status, &item.SellerID,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get conversation product: %w", err)
+	}
+
+	imageQuery := `
+		SELECT image_url FROM product_images
+		WHERE product_id = ?
+		ORDER BY sort_order ASC
+	`
+	rows, err := r.db.QueryContext(ctx, imageQuery, productID)
+	if err != nil {
+		return nil, fmt.Errorf("get product images: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			return nil, fmt.Errorf("scan product image: %w", err)
+		}
+		item.Images = append(item.Images, url)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate product images: %w", err)
+	}
+
+	return &item, nil
+}
+
 func scanConversation(row *sql.Row) (*Conversation, error) {
 	var item Conversation
 	var lastMessageID sql.NullInt64

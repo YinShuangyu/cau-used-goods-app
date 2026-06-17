@@ -55,3 +55,12 @@ type ProductForChat struct {
 	Title    string
 	Status   string
 }
+
+type ConversationProduct struct {
+	ID        uint64   `json:"id"`
+	Title     string   `json:"title"`
+	Price     float64  `json:"price"`
+	Status    string   `json:"status"`
+	Images    []string `json:"images"`
+	SellerID  uint64   `json:"sellerId"`
+}

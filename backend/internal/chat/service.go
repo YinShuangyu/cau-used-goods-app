@@ -100,6 +100,14 @@ func (s *Service) MarkRead(ctx context.Context, conversationID, userID uint64) (
 	return s.repo.MarkRead(ctx, conversation, userID)
 }
 
+func (s *Service) GetConversationProduct(ctx context.Context, conversationID, userID uint64) (*ConversationProduct, error) {
+	conversation, err := s.getConversationForUser(ctx, conversationID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.GetConversationProduct(ctx, conversation.ProductID)
+}
+
 func (s *Service) getConversationForUser(ctx context.Context, conversationID, userID uint64) (*Conversation, error) {
 	if conversationID == 0 {
 		return nil, fmt.Errorf("conversation not found")

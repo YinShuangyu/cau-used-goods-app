@@ -1,14 +1,10 @@
 <template>
   <view v-if="message" class="page">
-    <view class="hero" :class="{ 'auth-hero': isStudentAuthResult }">
-      <template v-if="isStudentAuthResult">
-        <text class="auth-title">{{ studentAuthPassed ? '学生认证通过' : '学生认证未通过' }}</text>
-      </template>
-      <template v-else>
-        <text class="eyebrow">SYSTEM MESSAGE</text>
-        <text class="hero-title">消息详情</text>
-        <text class="hero-copy">查看订单进度、举报处理和平台通知的完整内容</text>
-      </template>
+    <view v-if="isStudentAuthResult" class="hero auth-hero">
+      <text class="auth-title">{{ studentAuthPassed ? '学生认证通过' : '学生认证未通过' }}</text>
+    </view>
+    <view v-else-if="isPlainNotice" class="hero notice-hero">
+      <text class="hero-title">{{ noticeTitle }}</text>
     </view>
 
     <view v-if="isStudentAuthResult" class="auth-actions">
@@ -21,12 +17,12 @@
       <view class="message-top">
         <view class="message-icon">系</view>
         <view class="message-head">
-          <text class="title">{{ message.title || '系统消息' }}</text>
+          <text class="title">{{ detailTitle }}</text>
           <text class="time">{{ message.createdAt || message.createTime || '暂无时间' }}</text>
         </view>
         <text :class="['status-pill', statusClass]">{{ statusLabel }}</text>
       </view>
-      <text class="content">{{ message.content || '暂无正文内容' }}</text>
+      <text v-if="detailContent" class="content">{{ detailContent }}</text>
     </view>
 
     <view v-if="relatedCard" class="card related-card" @click="openRelated">
@@ -72,11 +68,15 @@ const isStudentAuthResult = computed(() => (
 const studentAuthPassed = computed(() => isStudentAuthResult.value && !String(message.value?.content || '').includes('未通过'))
 const statusLabel = computed(() => statusText(message.value?.status || message.value?.readStatus || (message.value?.read ? 'READ' : 'UNREAD')))
 const statusClass = computed(() => statusClassByValue(message.value?.status || message.value?.readStatus || (message.value?.read ? 'READ' : 'UNREAD')))
-const relatedButtonText = computed(() => {
-  if (message.value?.targetType === 'ORDER') return '查看相关订单'
-  if (message.value?.targetType === 'PRODUCT') return '查看相关商品'
-  if (message.value?.targetType === 'USER') return '查看用户主页'
-  return '查看详情'
+const isPlainNotice = computed(() => !hasConcreteRelated(message.value || {}))
+const noticeTitle = computed(() => message.value?.title || '平台公告')
+const detailTitle = computed(() => {
+  if (isPlainNotice.value) return message.value?.content || message.value?.title || '系统消息'
+  return message.value?.title || '系统消息'
+})
+const detailContent = computed(() => {
+  if (isPlainNotice.value) return ''
+  return message.value?.content || '暂无正文内容'
 })
 
 const relatedCard = computed(() => buildRelatedCard(message.value || {}))
@@ -167,6 +167,7 @@ function buildRelatedCard(item) {
   const order = item.order || item.relatedOrder
   const product = item.product || item.relatedProduct
   const user = item.user || item.relatedUser
+  if (!hasConcreteRelated(item)) return null
 
   if (targetType === 'ORDER' || order) {
     const data = order || item
@@ -213,21 +214,13 @@ function buildRelatedCard(item) {
     }
   }
 
-  if (item.targetId) {
-    return {
-      label: '相关对象',
-      title: item.targetTitle || '查看相关内容',
-      meta: statusLabel.value,
-      image: '',
-      status: item.targetType || '未预览',
-      statusClass: 'neutral',
-      placeholder: '关',
-      targetType,
-      targetId: item.targetId
-    }
-  }
-
   return null
+}
+
+function hasConcreteRelated(item = {}) {
+  const targetType = item.targetType || item.relatedType
+  return ['ORDER', 'PRODUCT', 'USER'].includes(targetType) ||
+    Boolean(item.order || item.relatedOrder || item.product || item.relatedProduct || item.user || item.relatedUser)
 }
 
 function openRelated() {
@@ -256,10 +249,11 @@ function goAppeal() {
 .loading-page { display: flex; align-items: center; justify-content: center; color: #667085; }
 .hero { padding: 34rpx 30rpx; border-radius: 28rpx; background: linear-gradient(135deg, #23734f, #3e9b72); color: #fff; box-shadow: 0 12rpx 32rpx rgba(35,115,79,.18); }
 .auth-hero { display: flex; min-height: 172rpx; align-items: center; justify-content: center; text-align: center; }
+.notice-hero { display: flex; min-height: 112rpx; align-items: center; justify-content: center; margin-bottom: 24rpx; text-align: center; }
 .auth-title { color: #fff; font-size: 42rpx; font-weight: 800; }
 .eyebrow, .hero-title, .hero-copy, .title, .time, .content, .related-label, .related-title, .related-meta { display: block; }
 .eyebrow { color: rgba(255,255,255,.72); font-size: 20rpx; letter-spacing: 2rpx; }
-.hero-title { margin-top: 12rpx; font-size: 40rpx; font-weight: 800; }
+.hero-title { font-size: 40rpx; font-weight: 800; }
 .hero-copy { margin-top: 10rpx; color: rgba(255,255,255,.78); font-size: 24rpx; line-height: 1.5; }
 .card { margin-top: 24rpx; padding: 30rpx; border-radius: 24rpx; background: #fff; box-shadow: 0 10rpx 30rpx rgba(28,68,52,.06); box-sizing: border-box; }
 .message-top { display: flex; align-items: flex-start; gap: 20rpx; }

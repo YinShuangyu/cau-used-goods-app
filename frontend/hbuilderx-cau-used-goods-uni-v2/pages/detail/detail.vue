@@ -53,21 +53,21 @@
         <button
           class="icon-button favorite"
           :class="{ active: isFavorite }"
-          :disabled="readonlyMode || isOwnProduct"
+          :disabled="readonlyMode || isOwnProduct || currentUserRestricted"
           @click="toggleFavorite"
         >
           {{ isFavorite ? '★' : '☆' }}
         </button>
         <button
           class="icon-button report"
-          :class="{ disabled: isOwnProduct || readonlyMode }"
-          :disabled="isOwnProduct || readonlyMode"
+          :class="{ disabled: isOwnProduct || readonlyMode || currentUserRestricted }"
+          :disabled="isOwnProduct || readonlyMode || currentUserRestricted"
           @click="report"
         >
           !
         </button>
-        <button class="chat" :disabled="readonlyMode || isOwnProduct" @click="chat">聊一聊</button>
-        <button class="primary" :disabled="readonlyMode || isOwnProduct || product.status !== 'ON_SALE'" @click="reserve">
+        <button class="chat" :disabled="readonlyMode || isOwnProduct || currentUserRestricted" @click="chat">聊一聊</button>
+        <button class="primary" :disabled="readonlyMode || isOwnProduct || product.status !== 'ON_SALE' || currentUserRestricted" @click="reserve">
           {{ actionText }}
         </button>
       </template>
@@ -95,7 +95,7 @@ import { getPublicProfile } from '../../api/user'
 import { buildCategoryMap, formatPrice, formatProduct, getStatusText, normalizeImage } from '../../utils/product-format'
 import { getToken, getUser, isVerifiedUser } from '../../utils/auth'
 import { navigate } from '../../utils/navigation'
-import { accountStatusOf, displayUserName, isBannedUserStatus, isCanceledUserStatus } from '../../utils/user-format'
+import { accountStatusOf, displayUserName, isBannedUserStatus, isCanceledUserStatus, isDisabledUserStatus } from '../../utils/user-format'
 import { addBrowseHistory } from '../../utils/browse-history'
 
 const product = ref(null)
@@ -108,6 +108,21 @@ const relatedId = ref('')
 const bannedSellerBlocked = ref(false)
 const sellerProfile = ref(null)
 const sellerAvatarFile = ref('')
+
+const currentUserStatus = computed(() => {
+  const user = getUser() || {}
+  return accountStatusOf(user)
+})
+const currentUserRestricted = computed(() => {
+  const status = currentUserStatus.value
+  return isBannedUserStatus(status) || isDisabledUserStatus(status)
+})
+const currentUserRestrictionText = computed(() => {
+  const status = currentUserStatus.value
+  if (isBannedUserStatus(status)) return '账号已被永久封禁，无法进行操作'
+  if (isDisabledUserStatus(status)) return '账号已被禁用，无法进行操作'
+  return ''
+})
 
 const pick = (...values) => values.find((value) => value !== undefined && value !== null && value !== '') || ''
 const statusText = computed(() => getStatusText(product.value?.status))
@@ -153,6 +168,7 @@ const sellerAvatarText = computed(() => {
 const actionText = computed(() => {
   if (readonlyMode.value) return '仅可查看'
   if (isOwnProduct.value) return '自己的商品'
+  if (currentUserRestricted.value) return '账号受限'
   return product.value?.status === 'ON_SALE' ? '提交预约' : statusText.value
 })
 
@@ -163,6 +179,10 @@ function toast(title, icon = 'none') {
 function ensureVerified() {
   if (readonlyMode.value) {
     toast('该商品仅可查看')
+    return false
+  }
+  if (currentUserRestricted.value) {
+    toast(currentUserRestrictionText.value)
     return false
   }
   if (!getToken()) {

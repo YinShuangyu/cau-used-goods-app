@@ -3,7 +3,7 @@
     <view class="chat-head">
       <view class="chat-title clickable-title" @click="openSellerProfile">
         <text>{{ sellerName }}</text>
-        <text class="profile-link">{{ isTargetUnavailable ? '已禁用' : '查看主页' }}</text>
+        <text class="profile-link">{{ isTargetUnavailable && !isCurrentUserRestricted ? '已禁用' : '查看主页' }}</text>
       </view>
       <view class="chat-subtitle">请在平台内沟通交易细节，注意保护个人隐私</view>
     </view>
@@ -16,7 +16,11 @@
       <text class="product-link-arrow">›</text>
     </view>
 
-    <scroll-view scroll-y class="messages" :class="{ 'has-product': productId }" :scroll-into-view="lastMessageId">
+    <view v-if="isCurrentUserRestricted" class="restriction-banner">
+      <text class="restriction-text">{{ currentUserRestrictionText }}</text>
+    </view>
+
+    <scroll-view scroll-y class="messages" :class="{ 'has-product': productId, 'has-restriction': isCurrentUserRestricted }" :scroll-into-view="lastMessageId">
       <view v-for="item in displayMessages" :id="`msg-${item.id}`" :key="item.id">
         <view v-if="item.showTime" class="time-divider">{{ item.timeText }}</view>
         <view class="message-swipe" :class="{ active: swipedMessageId === item.id }">
@@ -59,9 +63,9 @@
       <view v-if="!messages.length && !loading" class="empty">还没有消息，先打个招呼吧</view>
     </scroll-view>
 
-    <view class="composer">
-      <input v-model.trim="draft" class="input" maxlength="500" confirm-type="send" placeholder="输入消息" @confirm="send" />
-      <button class="send" :disabled="!draft || sending" @click="send">发送</button>
+    <view class="composer" :class="{ restricted: isCurrentUserRestricted }">
+      <input v-model.trim="draft" class="input" maxlength="500" confirm-type="send" :placeholder="isCurrentUserRestricted ? currentUserRestrictionText : '输入消息'" :disabled="isCurrentUserRestricted" @confirm="send" />
+      <button class="send" :disabled="!draft || sending || isCurrentUserRestricted" @click="send">发送</button>
     </view>
   </view>
 </template>
@@ -74,7 +78,7 @@ import { getPublicProfile } from '../../api/user'
 import { getUser } from '../../utils/auth'
 import { BASE_URL } from '../../utils/request'
 import { navigate } from '../../utils/navigation'
-import { accountStatusOf, isBannedUserStatus } from '../../utils/user-format'
+import { accountStatusOf, isBannedUserStatus, isDisabledUserStatus } from '../../utils/user-format'
 
 const conversationId = ref('')
 const title = ref('')
@@ -95,6 +99,13 @@ let touchMessageId = ''
 
 const currentUserId = computed(() => getUser()?.id || getUser()?.userId || '')
 const currentUser = computed(() => getUser() || {})
+const currentUserAccountStatus = computed(() => accountStatusOf(currentUser.value))
+const isCurrentUserRestricted = computed(() => isBannedUserStatus(currentUserAccountStatus.value) || isDisabledUserStatus(currentUserAccountStatus.value))
+const currentUserRestrictionText = computed(() => {
+  if (isBannedUserStatus(currentUserAccountStatus.value)) return '账号已被封禁，无法发送消息'
+  if (isDisabledUserStatus(currentUserAccountStatus.value)) return '账号已被禁用，无法发送消息'
+  return ''
+})
 const productTitle = computed(() => title.value || '商品详情')
 const pick = (...values) => values.find((value) => value !== undefined && value !== null && value !== '') || ''
 const BANNED_USER_TEXT = '！该用户已被封禁，无法查找'
@@ -107,8 +118,11 @@ const isTargetUnavailable = computed(() => (
   || looksLikeEncodedNickname(targetNicknameSnapshot.value)
 ))
 const sellerName = computed(() => {
-  if (isTargetUnavailable.value) return BANNED_USER_TEXT
-  return targetProfile.value?.nickname || targetNicknameSnapshot.value || '对方'
+  const raw = targetProfile.value?.nickname || targetNicknameSnapshot.value || '对方'
+  if (looksLikeEncodedNickname(raw)) {
+    try { return decodeURIComponent(raw) } catch (e) { return raw }
+  }
+  return raw
 })
 const targetAvatar = computed(() => normalizeImage(pick(targetProfile.value?.avatarUrl, targetProfile.value?.avatar, targetProfile.value?.avatar_url, targetAvatarSnapshot.value)))
 const mineAvatar = computed(() => normalizeImage(pick(currentUser.value.avatarUrl, currentUser.value.avatar, mineProfile.value?.avatarUrl, mineProfile.value?.avatar, mineProfile.value?.avatar_url)))
@@ -278,6 +292,10 @@ async function loadInitialTargetProfile() {
 
 const send = async () => {
   if (!draft.value || sending.value) return
+  if (isCurrentUserRestricted.value) {
+    uni.showToast({ title: currentUserRestrictionText.value, icon: 'none' })
+    return
+  }
   const original = draft.value
   sending.value = true
   try {
@@ -326,6 +344,14 @@ const removeMessage = async (item) => {
 }
 
 function openUser(id) {
+  if (isCurrentUserRestricted.value) {
+    uni.showModal({
+      title: '提示',
+      content: '你已被封禁，无法查看用户主页',
+      showCancel: false
+    })
+    return
+  }
   if (isTargetUnavailable.value && String(id || targetUserId.value) === String(targetUserId.value)) {
     uni.showModal({
       title: '提示',
@@ -340,6 +366,14 @@ function openUser(id) {
 }
 
 function openSellerProfile() {
+  if (isCurrentUserRestricted.value) {
+    uni.showModal({
+      title: '提示',
+      content: '你已被封禁，无法查看用户主页',
+      showCancel: false
+    })
+    return
+  }
   if (isTargetUnavailable.value) {
     uni.showModal({
       title: '提示',
@@ -417,6 +451,10 @@ onPullDownRefresh(async () => {
 .product-link-arrow { color: #9aa5a1; font-size: 42rpx; line-height: 1; }
 .messages { height: calc(100vh - 210rpx); padding: 20rpx 28rpx 24rpx; box-sizing: border-box; }
 .messages.has-product { height: calc(100vh - 318rpx); }
+.messages.has-restriction { height: calc(100vh - 268rpx); }
+.messages.has-product.has-restriction { height: calc(100vh - 376rpx); }
+.restriction-banner { padding: 14rpx 28rpx; background: #fef3f2; border-bottom: 1rpx solid #fee4e2; text-align: center; }
+.restriction-text { color: #d92d20; font-size: 26rpx; font-weight: 500; }
 .time-divider { width: fit-content; max-width: 420rpx; margin: 18rpx auto; padding: 6rpx 16rpx; border-radius: 999rpx; background: #dfe7e3; color: #7b8782; font-size: 21rpx; text-align: center; }
 .message-swipe { position: relative; overflow: hidden; margin: 0 -28rpx 18rpx; padding: 0 28rpx; }
 .message-delete { position: absolute; top: 6rpx; right: 28rpx; bottom: 6rpx; display: flex; width: 120rpx; align-items: center; justify-content: center; border-radius: 16rpx; background: #f04444; color: #fff; font-size: 26rpx; opacity: 0; transition: opacity .12s ease; }
@@ -435,6 +473,9 @@ onPullDownRefresh(async () => {
 .content { font-size: 27rpx; line-height: 1.55; word-break: break-word; }
 .empty { margin-top: 180rpx; color: #929c98; text-align: center; }
 .composer { position: fixed; right: 0; bottom: 0; left: 0; display: flex; gap: 14rpx; padding: 18rpx 22rpx calc(18rpx + env(safe-area-inset-bottom)); background: #fff; box-sizing: border-box; }
+.composer.restricted { background: #f5f5f5; }
+.composer.restricted .input { background: #e8e8e8; color: #999; }
+.composer.restricted .send { background: #b8c5c0; }
 .input { flex: 1; height: 76rpx; padding: 0 24rpx; border-radius: 999rpx; background: #f2f5f3; font-size: 27rpx; box-sizing: border-box; }
 .send { width: 132rpx; height: 76rpx; border-radius: 999rpx; background: #23734f; color: #fff; font-size: 27rpx; line-height: 76rpx; }
 .send[disabled] { background: #b8c5c0; }

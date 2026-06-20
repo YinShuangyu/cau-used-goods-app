@@ -43,19 +43,7 @@
       <text class="arrow">›</text>
     </view>
 
-    <view class="card result-card">
-      <view class="result-row">
-        <text class="result-label">处理状态</text>
-        <text class="result-value">{{ statusLabel }}</text>
-      </view>
-      <view v-if="message.handleResult || message.result" class="result-row multiline">
-        <text class="result-label">处理结果</text>
-        <text class="result-value">{{ message.handleResult || message.result }}</text>
-      </view>
-    </view>
-
     <view class="actions">
-      <button v-if="relatedCard" class="btn primary" @click="openRelated">{{ relatedButtonText }}</button>
       <button class="btn plain" @click="goMessages">返回消息中心</button>
     </view>
     </template>
@@ -70,6 +58,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { tradeService } from '../../services/trade'
+import { getProductById, listMyProducts } from '../../api/product'
 import { navigate, showError } from '../../utils/navigation'
 import { BASE_URL } from '../../utils/request'
 
@@ -94,12 +83,36 @@ const relatedCard = computed(() => buildRelatedCard(message.value || {}))
 
 onLoad(async (options) => {
   try {
-    message.value = await tradeService.getMessage(options.id)
+    const data = await tradeService.getMessage(options.id)
+    await hydrateRelatedProduct(data)
+    message.value = data
     await tradeService.markMessageRead(options.id)
   } catch (error) {
     showError(error)
   }
 })
+
+async function hydrateRelatedProduct(item = {}) {
+  const targetType = item.targetType || item.relatedType
+  const targetId = item.targetId || item.relatedId
+  if (targetType !== 'PRODUCT' || !targetId || item.product || item.relatedProduct) return
+
+  try {
+    item.product = await getProductById(targetId)
+    return
+  } catch (error) {
+    // 下架商品的公开详情可能不可见，卖家本人再从“我的商品”兜底取展示信息。
+  }
+
+  try {
+    const result = await listMyProducts()
+    const list = Array.isArray(result) ? result : (result?.items || result?.list || [])
+    const product = list.find((entry) => String(entry.id) === String(targetId))
+    if (product) item.product = product
+  } catch (error) {
+    // 没有权限或不是卖家本人时保持占位图，不影响消息详情展示。
+  }
+}
 
 function absoluteImage(url) {
   if (!url) return ''
@@ -142,8 +155,11 @@ function statusClassByValue(value) {
 
 function pickImage(item = {}) {
   const images = Array.isArray(item.images) ? item.images : []
-  return item.image || item.productImage || item.productImageUrl || item.productCover || item.coverImage || item.imageUrl ||
-    item.snapshotImage || item.productImageSnapshot || item.product?.image || item.product?.coverImage || item.product?.images?.[0] || images[0] || ''
+  return item.image || item.productImage || item.productImageUrl || item.productCover || item.productCoverImage ||
+    item.coverImage || item.coverImageUrl || item.imageUrl || item.snapshotImage || item.productImageSnapshot ||
+    item.product?.image || item.product?.productImage || item.product?.productImageUrl || item.product?.productCover ||
+    item.product?.productCoverImage || item.product?.coverImage || item.product?.coverImageUrl ||
+    item.product?.imageUrl || item.product?.images?.[0] || images[0] || ''
 }
 
 function buildRelatedCard(item) {
@@ -163,7 +179,7 @@ function buildRelatedCard(item) {
       statusClass: statusClassByValue(data.status || item.status),
       placeholder: '单',
       targetType: 'ORDER',
-      targetId: data.id || item.targetId
+      targetId: order ? (data.id || item.targetId) : item.targetId
     }
   }
 
@@ -178,7 +194,7 @@ function buildRelatedCard(item) {
       statusClass: statusClassByValue(data.status || item.status),
       placeholder: '物',
       targetType: 'PRODUCT',
-      targetId: data.id || item.targetId
+      targetId: product ? (data.id || item.targetId) : item.targetId
     }
   }
 
@@ -193,7 +209,7 @@ function buildRelatedCard(item) {
       statusClass: statusClassByValue(data.authStatus || data.accountStatus),
       placeholder: '人',
       targetType: 'USER',
-      targetId: data.id || item.targetId
+      targetId: user ? (data.id || item.targetId) : item.targetId
     }
   }
 

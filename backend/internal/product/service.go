@@ -245,7 +245,7 @@ func (s *Service) GetProductByID(ctx context.Context, id uint64, viewer ProductV
 	if err := s.repo.IncrementViewCount(ctx, id, viewer); err != nil {
 		return nil, err
 	}
-	return s.repo.GetProductByID(ctx, id)
+	return s.repo.GetProductByID(ctx, id, viewer)
 }
 
 func (s *Service) AdminGetProductByID(ctx context.Context, id uint64) (*Product, error) {

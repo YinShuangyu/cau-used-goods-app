@@ -443,7 +443,7 @@ func (r *Repository) IncrementViewCount(ctx context.Context, productID uint64, v
 	}
 	return nil
 }
-func (r *Repository) GetProductByID(ctx context.Context, id uint64) (*Product, error) {
+func (r *Repository) GetProductByID(ctx context.Context, id uint64, viewer ProductViewer) (*Product, error) {
 	var p Product
 	var desc sql.NullString
 	var originalPrice sql.NullFloat64
@@ -455,8 +455,14 @@ func (r *Repository) GetProductByID(ctx context.Context, id uint64) (*Product, e
 		       price, condition_level, meet_location, status, view_count,
 		       favorite_count, DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s')
 		FROM products
-		WHERE id = ? AND is_deleted = 0 AND status = 'ON_SALE'
-	`, id).Scan(
+		WHERE id = ?
+		  AND is_deleted = 0
+		  AND (
+		      status = 'ON_SALE'
+		      OR seller_id = ?
+		      OR ? IN ('ADMIN', 'SUPER_ADMIN')
+		  )
+	`, id, viewer.UserID, viewer.Role).Scan(
 		&p.ID, &p.SellerID, &p.CategoryID, &p.Title, &desc, &originalPrice,
 		&p.Price, &condition, &location, &p.Status, &p.ViewCount,
 		&p.FavoriteCount, &p.CreateTime,

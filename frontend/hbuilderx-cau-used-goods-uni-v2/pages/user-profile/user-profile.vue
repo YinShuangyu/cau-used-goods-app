@@ -19,8 +19,8 @@
           <button v-if="canRecoverUser" class="recover-btn" @click="changeUserStatus('NORMAL')">恢复</button>
         </template>
         <template v-else>
-          <button v-if="!isSelf" class="chat-btn" @click="chatWithUser">聊一聊</button>
-          <button class="report-btn" @click="reportUser">举报该用户</button>
+          <button v-if="!isSelf" class="chat-btn" :disabled="isCurrentUserRestricted" @click="chatWithUser">聊一聊</button>
+          <button class="report-btn" :disabled="isCurrentUserRestricted" @click="reportUser">举报该用户</button>
         </template>
       </view>
     </view>
@@ -71,6 +71,7 @@ import { createOrGetConversation } from '../../api/chat'
 import { getUser } from '../../utils/auth'
 import { BASE_URL } from '../../utils/request'
 import { navigate, showError } from '../../utils/navigation'
+import { accountStatusOf, isBannedUserStatus, isDisabledUserStatus } from '../../utils/user-format'
 
 const userId = ref('')
 const adminView = ref(false)
@@ -85,6 +86,13 @@ const reviews = ref([])
 
 const currentUserId = computed(() => getUser()?.id || getUser()?.userId || '')
 const isSelf = computed(() => String(userId.value) === String(currentUserId.value))
+const currentUserAccountStatus = computed(() => accountStatusOf(getUser() || {}))
+const isCurrentUserRestricted = computed(() => isBannedUserStatus(currentUserAccountStatus.value) || isDisabledUserStatus(currentUserAccountStatus.value))
+const currentUserRestrictionText = computed(() => {
+  if (isBannedUserStatus(currentUserAccountStatus.value)) return '你已被封禁，无法进行操作'
+  if (isDisabledUserStatus(currentUserAccountStatus.value)) return '你已被禁用，无法进行操作'
+  return ''
+})
 const displayName = computed(() => profile.value?.nickname || 'CAU 同学')
 const avatarUrl = computed(() => normalizeImage(profile.value?.avatarUrl))
 const accountStatus = computed(() => adminUser.value?.accountStatus || (profile.value?.tradeAvailable ? 'NORMAL' : 'DISABLED'))
@@ -173,6 +181,10 @@ function reportUser() {
     uni.showToast({ title: '不能举报自己', icon: 'none' })
     return
   }
+  if (isCurrentUserRestricted.value) {
+    uni.showToast({ title: currentUserRestrictionText.value, icon: 'none' })
+    return
+  }
   navigate('/pages/interaction/report', { targetType: 'USER', targetId: userId.value })
 }
 
@@ -216,6 +228,10 @@ function changeUserStatus(status) {
 }
 
 async function chatWithUser() {
+  if (isCurrentUserRestricted.value) {
+    uni.showToast({ title: currentUserRestrictionText.value, icon: 'none' })
+    return
+  }
   const product = preferredProductId.value
     ? { id: preferredProductId.value, title: preferredProductTitle.value || products.value[0]?.title || '商品咨询' }
     : products.value[0]

@@ -86,6 +86,7 @@ import {
   addFavorite,
   checkFavorite,
   getProductById,
+  listMyProducts,
   listCategories,
   removeFavorite
 } from '../../api/product'
@@ -376,6 +377,27 @@ function buildSnapshotProduct(id, options = {}) {
   }
 }
 
+async function loadOwnProductFallback(id, options = {}) {
+  if (!getToken()) return false
+  try {
+    const [ownProducts, categories] = await Promise.all([
+      listMyProducts(),
+      listCategories().catch(() => [])
+    ])
+    const list = Array.isArray(ownProducts) ? ownProducts : (ownProducts?.items || ownProducts?.list || [])
+    const ownProduct = list.find((item) => String(item.id) === String(id))
+    if (!ownProduct) return false
+    product.value = applySnapshotOverrides(formatProduct(ownProduct, buildCategoryMap(categories)), options)
+    uni.setStorageSync(`product-detail-cache-${id}`, product.value)
+    failedImages.value = []
+    await loadSellerProfile()
+    await loadFavoriteState(id)
+    return true
+  } catch (error) {
+    return false
+  }
+}
+
 function getDetailErrorText(error) {
   const message = String(error?.message || '').toLowerCase()
   if (message.includes('not found')) return '商品不存在或已下架'
@@ -413,6 +435,8 @@ onLoad(async (options) => {
     await loadSellerProfile()
     await loadFavoriteState(id)
   } catch (error) {
+    if (!readonlyMode.value && await loadOwnProductFallback(id, options)) return
+
     const cached = uni.getStorageSync(`product-detail-cache-${id}`)
     if (cached) {
       product.value = adminView.value ? applySnapshotOverrides(cached, options) : cached

@@ -1,11 +1,14 @@
 <template>
   <view v-if="message" class="page">
-    <view class="hero" :class="{ 'auth-hero': isStudentAuthResult || isAccountStatusChange }">
+    <view class="hero" :class="{ 'auth-hero': isStudentAuthResult || isAccountStatusChange, 'notice-hero': isPlainNotice }">
       <template v-if="isStudentAuthResult">
         <text class="auth-title">{{ studentAuthPassed ? '学生认证通过' : '学生认证未通过' }}</text>
       </template>
       <template v-else-if="isAccountStatusChange">
         <text class="auth-title">{{ accountStatusTitle }}</text>
+      </template>
+      <template v-else-if="isPlainNotice">
+        <text class="hero-title">{{ noticeTitle }}</text>
       </template>
       <template v-else>
         <text class="eyebrow">SYSTEM MESSAGE</text>
@@ -38,12 +41,12 @@
       <view class="message-top">
         <view class="message-icon">系</view>
         <view class="message-head">
-          <text class="title">{{ message.title || '系统消息' }}</text>
+          <text class="title">{{ detailTitle }}</text>
           <text class="time">{{ message.createdAt || message.createTime || '暂无时间' }}</text>
         </view>
         <text :class="['status-pill', statusClass]">{{ statusLabel }}</text>
       </view>
-      <text class="content">{{ message.content || '暂无正文内容' }}</text>
+      <text v-if="detailContent" class="content">{{ detailContent }}</text>
     </view>
 
     <view v-if="relatedCard" class="card related-card" @click="openRelated">
@@ -60,19 +63,7 @@
       <text class="arrow">›</text>
     </view>
 
-    <view class="card result-card">
-      <view class="result-row">
-        <text class="result-label">处理状态</text>
-        <text class="result-value">{{ statusLabel }}</text>
-      </view>
-      <view v-if="message.handleResult || message.result" class="result-row multiline">
-        <text class="result-label">处理结果</text>
-        <text class="result-value">{{ message.handleResult || message.result }}</text>
-      </view>
-    </view>
-
     <view class="actions">
-      <button v-if="relatedCard" class="btn primary" @click="openRelated">{{ relatedButtonText }}</button>
       <button class="btn plain" @click="goMessages">返回消息中心</button>
     </view>
     </template>
@@ -87,6 +78,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { tradeService } from '../../services/trade'
+import { getProductById, listMyProducts } from '../../api/product'
 import { navigate, showError } from '../../utils/navigation'
 import { BASE_URL } from '../../utils/request'
 
@@ -135,23 +127,51 @@ const transactionHint = computed(() => {
 })
 const statusLabel = computed(() => statusText(message.value?.status || message.value?.readStatus || (message.value?.read ? 'READ' : 'UNREAD')))
 const statusClass = computed(() => statusClassByValue(message.value?.status || message.value?.readStatus || (message.value?.read ? 'READ' : 'UNREAD')))
-const relatedButtonText = computed(() => {
-  if (message.value?.targetType === 'ORDER') return '查看相关订单'
-  if (message.value?.targetType === 'PRODUCT') return '查看相关商品'
-  if (message.value?.targetType === 'USER') return '查看用户主页'
-  return '查看详情'
+const isPlainNotice = computed(() => !hasConcreteRelated(message.value || {}))
+const noticeTitle = computed(() => message.value?.title || '平台公告')
+const detailTitle = computed(() => {
+  if (isPlainNotice.value) return message.value?.content || message.value?.title || '系统消息'
+  return message.value?.title || '系统消息'
+})
+const detailContent = computed(() => {
+  if (isPlainNotice.value) return ''
+  return message.value?.content || '暂无正文内容'
 })
 
 const relatedCard = computed(() => buildRelatedCard(message.value || {}))
 
 onLoad(async (options) => {
   try {
-    message.value = await tradeService.getMessage(options.id)
+    const data = await tradeService.getMessage(options.id)
+    await hydrateRelatedProduct(data)
+    message.value = data
     await tradeService.markMessageRead(options.id)
   } catch (error) {
     showError(error)
   }
 })
+
+async function hydrateRelatedProduct(item = {}) {
+  const targetType = item.targetType || item.relatedType
+  const targetId = item.targetId || item.relatedId
+  if (targetType !== 'PRODUCT' || !targetId || item.product || item.relatedProduct) return
+
+  try {
+    item.product = await getProductById(targetId)
+    return
+  } catch (error) {
+    // 下架商品的公开详情可能不可见，卖家本人再从“我的商品”兜底取展示信息。
+  }
+
+  try {
+    const result = await listMyProducts()
+    const list = Array.isArray(result) ? result : (result?.items || result?.list || [])
+    const product = list.find((entry) => String(entry.id) === String(targetId))
+    if (product) item.product = product
+  } catch (error) {
+    // 没有权限或不是卖家本人时保持占位图，不影响消息详情展示。
+  }
+}
 
 function absoluteImage(url) {
   if (!url) return ''
@@ -194,8 +214,11 @@ function statusClassByValue(value) {
 
 function pickImage(item = {}) {
   const images = Array.isArray(item.images) ? item.images : []
-  return item.image || item.productImage || item.productImageUrl || item.productCover || item.coverImage || item.imageUrl ||
-    item.snapshotImage || item.productImageSnapshot || item.product?.image || item.product?.coverImage || item.product?.images?.[0] || images[0] || ''
+  return item.image || item.productImage || item.productImageUrl || item.productCover || item.productCoverImage ||
+    item.coverImage || item.coverImageUrl || item.imageUrl || item.snapshotImage || item.productImageSnapshot ||
+    item.product?.image || item.product?.productImage || item.product?.productImageUrl || item.product?.productCover ||
+    item.product?.productCoverImage || item.product?.coverImage || item.product?.coverImageUrl ||
+    item.product?.imageUrl || item.product?.images?.[0] || images[0] || ''
 }
 
 function buildRelatedCard(item) {
@@ -203,6 +226,7 @@ function buildRelatedCard(item) {
   const order = item.order || item.relatedOrder
   const product = item.product || item.relatedProduct
   const user = item.user || item.relatedUser
+  if (!hasConcreteRelated(item)) return null
 
   if (targetType === 'ORDER' || order) {
     const data = order || item
@@ -215,7 +239,7 @@ function buildRelatedCard(item) {
       statusClass: statusClassByValue(data.status || item.status),
       placeholder: '单',
       targetType: 'ORDER',
-      targetId: data.id || item.targetId
+      targetId: order ? (data.id || item.targetId) : item.targetId
     }
   }
 
@@ -230,7 +254,7 @@ function buildRelatedCard(item) {
       statusClass: statusClassByValue(data.status || item.status),
       placeholder: '物',
       targetType: 'PRODUCT',
-      targetId: data.id || item.targetId
+      targetId: product ? (data.id || item.targetId) : item.targetId
     }
   }
 
@@ -245,25 +269,17 @@ function buildRelatedCard(item) {
       statusClass: statusClassByValue(data.authStatus || data.accountStatus),
       placeholder: '人',
       targetType: 'USER',
-      targetId: data.id || item.targetId
-    }
-  }
-
-  if (item.targetId) {
-    return {
-      label: '相关对象',
-      title: item.targetTitle || '查看相关内容',
-      meta: statusLabel.value,
-      image: '',
-      status: item.targetType || '未预览',
-      statusClass: 'neutral',
-      placeholder: '关',
-      targetType,
-      targetId: item.targetId
+      targetId: user ? (data.id || item.targetId) : item.targetId
     }
   }
 
   return null
+}
+
+function hasConcreteRelated(item = {}) {
+  const targetType = item.targetType || item.relatedType
+  return ['ORDER', 'PRODUCT', 'USER'].includes(targetType) ||
+    Boolean(item.order || item.relatedOrder || item.product || item.relatedProduct || item.user || item.relatedUser)
 }
 
 function openRelated() {
@@ -292,10 +308,11 @@ function goAppeal() {
 .loading-page { display: flex; align-items: center; justify-content: center; color: #667085; }
 .hero { padding: 34rpx 30rpx; border-radius: 28rpx; background: linear-gradient(135deg, #23734f, #3e9b72); color: #fff; box-shadow: 0 12rpx 32rpx rgba(35,115,79,.18); }
 .auth-hero { display: flex; min-height: 172rpx; align-items: center; justify-content: center; text-align: center; }
+.notice-hero { display: flex; min-height: 112rpx; align-items: center; justify-content: center; margin-bottom: 24rpx; text-align: center; }
 .auth-title { color: #fff; font-size: 42rpx; font-weight: 800; }
 .eyebrow, .hero-title, .hero-copy, .title, .time, .content, .related-label, .related-title, .related-meta { display: block; }
 .eyebrow { color: rgba(255,255,255,.72); font-size: 20rpx; letter-spacing: 2rpx; }
-.hero-title { margin-top: 12rpx; font-size: 40rpx; font-weight: 800; }
+.hero-title { font-size: 40rpx; font-weight: 800; }
 .hero-copy { margin-top: 10rpx; color: rgba(255,255,255,.78); font-size: 24rpx; line-height: 1.5; }
 .card { margin-top: 24rpx; padding: 30rpx; border-radius: 24rpx; background: #fff; box-shadow: 0 10rpx 30rpx rgba(28,68,52,.06); box-sizing: border-box; }
 .message-top { display: flex; align-items: flex-start; gap: 20rpx; }

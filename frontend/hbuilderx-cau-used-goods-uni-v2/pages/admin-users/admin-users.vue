@@ -27,6 +27,16 @@
         {{ item.label }}
       </view>
     </view>
+    <view class="filters">
+      <view
+        v-for="item in userScopeOptions"
+        :key="item.value"
+        :class="['chip', filters.userScope === item.value ? 'active' : '']"
+        @click="setFilter('userScope', item.value)"
+      >
+        {{ item.label }}
+      </view>
+    </view>
 
     <view v-if="!loading && users.length === 0" class="empty">暂无用户</view>
 
@@ -104,7 +114,7 @@ const total = ref(0)
 const expandedId = ref(null)
 const detail = ref({})
 const related = ref({ products: [], orders: [], reports: [] })
-const filters = ref({ keyword: '', accountStatus: '', authStatus: '' })
+const filters = ref({ keyword: '', accountStatus: '', authStatus: '', userScope: 'ALL' })
 
 const accountOptions = [
   { label: '全部状态', value: '' },
@@ -118,6 +128,10 @@ const authOptions = [
   { label: '审核中', value: 'PENDING' },
   { label: '已认证', value: 'VERIFIED' },
   { label: '已驳回', value: 'REJECTED' }
+]
+const userScopeOptions = [
+  { label: '全部用户', value: 'ALL' },
+  { label: '仅业务用户', value: 'BUSINESS' }
 ]
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
@@ -135,17 +149,23 @@ function reload() {
 async function loadUsers() {
   loading.value = true
   try {
-    const result = await getAdminUsers({ ...filters.value, page: page.value, pageSize })
+    const { userScope, ...query } = filters.value
+    const result = await getAdminUsers({ ...query, page: page.value, pageSize })
     const rawUsers = result?.items || []
-    const details = await Promise.all(rawUsers.map(async (item) => {
-      try {
-        return await getAdminUserDetail(item.id)
-      } catch (error) {
-        return null
-      }
-    }))
-    users.value = rawUsers.filter((item, index) => isBusinessUser(item, details[index]))
-    total.value = users.value.length
+    if (userScope === 'BUSINESS') {
+      const details = await Promise.all(rawUsers.map(async (item) => {
+        try {
+          return await getAdminUserDetail(item.id)
+        } catch (error) {
+          return null
+        }
+      }))
+      users.value = rawUsers.filter((item, index) => isBusinessUser(item, details[index]))
+      total.value = users.value.length
+      return
+    }
+    users.value = rawUsers
+    total.value = Number(result?.total || rawUsers.length)
   } catch (error) {
     uni.showToast({ title: error.message || '用户加载失败', icon: 'none' })
   } finally {

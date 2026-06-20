@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"cau-used-goods-app/backend/internal/message"
 )
 
 var ErrAnnouncementNotFound = errors.New("announcement not found")
@@ -118,6 +120,57 @@ func (r *Repository) UpdateAnnouncementStatusTx(ctx context.Context, tx *sql.Tx,
 		return fmt.Errorf("update announcement status: %w", err)
 	}
 	return r.checkAnnouncementRowsAffected(ctx, id, result)
+}
+
+func (r *Repository) BroadcastPublishedAnnouncementTx(ctx context.Context, tx *sql.Tx, announcementID, senderID uint64) (int64, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("broadcast announcement requires transaction")
+	}
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO messages (
+			receiver_id, sender_id, message_type, title, content,
+			related_type, related_id, read_status
+		)
+		SELECT
+			u.id,
+			?,
+			?,
+			CONCAT('平台公告：', a.title),
+			COALESCE(NULLIF(a.content, ''), a.title),
+			?,
+			a.id,
+			?
+		FROM users u
+		JOIN announcements a ON a.id = ?
+		WHERE a.status = 'PUBLISHED'
+		  AND u.is_deleted = 0
+		  AND u.account_status <> 'CANCELED'
+		  AND u.role NOT IN ('ADMIN', 'SUPER_ADMIN')
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM messages m
+			WHERE m.receiver_id = u.id
+			  AND m.message_type = ?
+			  AND m.related_type = ?
+			  AND m.related_id = a.id
+		  )
+	`,
+		senderID,
+		message.MessageTypeSystemNotice,
+		message.RelatedTypeNotice,
+		message.ReadStatusUnread,
+		announcementID,
+		message.MessageTypeSystemNotice,
+		message.RelatedTypeNotice,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("broadcast announcement message: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("check broadcast announcement result: %w", err)
+	}
+	return affected, nil
 }
 
 type announcementExecutor interface {

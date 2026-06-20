@@ -77,8 +77,8 @@
         <view class="overview-card">
           <view class="overview-head">
             <text class="overview-title">风控情况</text>
-            <text :class="['overview-tag', reportOverview.pendingReports ? 'danger' : '']">
-              {{ reportOverview.pendingReports ? '需处理' : '正常' }}
+            <text :class="['overview-tag', riskTodoCount ? 'danger' : '']">
+              {{ riskTodoCount ? '需处理' : '正常' }}
             </text>
           </view>
           <view :class="['overview-main', riskTodoCount ? 'danger' : '']">
@@ -86,12 +86,16 @@
           </view>
           <view class="overview-sub">待处理申诉和举报</view>
           <view class="overview-row">
-            <text>商品举报</text>
-            <text>{{ reportOverview.productReports || 0 }}</text>
+            <text>商品举报/申诉</text>
+            <text>{{ productRiskCount }}</text>
           </view>
           <view class="overview-row">
-            <text>用户举报</text>
-            <text>{{ reportOverview.userReports || 0 }}</text>
+            <text>用户举报/申诉</text>
+            <text>{{ userRiskCount }}</text>
+          </view>
+          <view class="overview-row">
+            <text>订单举报/申诉</text>
+            <text>{{ orderRiskCount }}</text>
           </view>
         </view>
       </view>
@@ -284,6 +288,18 @@ const productTrend = ref([])
 
 const riskTodoCount = computed(() => {
   return Number(reportOverview.value.pendingReports || 0) + Number(appealOverview.value.pendingAppeals || 0)
+})
+
+const productRiskCount = computed(() => {
+  return Number(reportOverview.value.productReports || 0) + Number(appealOverview.value.productAppeals || 0)
+})
+
+const userRiskCount = computed(() => {
+  return Number(reportOverview.value.userReports || 0) + Number(appealOverview.value.userAppeals || 0)
+})
+
+const orderRiskCount = computed(() => {
+  return Number(reportOverview.value.orderReports || 0) + Number(appealOverview.value.orderAppeals || 0)
 })
 
 const adminAvatarUrl = computed(() => {

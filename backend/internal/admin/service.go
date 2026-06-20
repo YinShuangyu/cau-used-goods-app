@@ -43,6 +43,11 @@ func (s *Service) CreateAnnouncement(ctx context.Context, input CreateAnnounceme
 		if err != nil {
 			return err
 		}
+		if input.Status == AnnouncementStatusPublished {
+			if _, err := s.repo.BroadcastPublishedAnnouncementTx(ctx, tx, id, input.AdminID); err != nil {
+				return err
+			}
+		}
 		_, err = s.LogActionTx(ctx, tx, LogActionInput{
 			AdminID:       input.AdminID,
 			OperationType: OperationCreateNotice,
@@ -111,6 +116,11 @@ func (s *Service) UpdateAnnouncementStatus(ctx context.Context, input UpdateAnno
 	return db.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := s.repo.UpdateAnnouncementStatusTx(ctx, tx, input.ID, input.Status); err != nil {
 			return err
+		}
+		if input.Status == AnnouncementStatusPublished {
+			if _, err := s.repo.BroadcastPublishedAnnouncementTx(ctx, tx, input.ID, input.AdminID); err != nil {
+				return err
+			}
 		}
 		_, err := s.LogActionTx(ctx, tx, LogActionInput{
 			AdminID:       input.AdminID,

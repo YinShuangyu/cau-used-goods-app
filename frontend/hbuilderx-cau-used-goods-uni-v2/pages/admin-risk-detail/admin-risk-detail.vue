@@ -84,9 +84,9 @@ import {
   handleAdminAppeal,
   handleAdminReport,
   markAdminAppealProcessing,
-  markAdminReportProcessing
+  markAdminReportProcessing,
+  getAdminProductById
 } from '../../api/admin'
-import { getProductById } from '../../api/product'
 import { normalizeImage } from '../../utils/product-format'
 import { displayRelatedUserName } from '../../utils/user-format'
 
@@ -131,7 +131,7 @@ const load = async () => {
     product.value = null
     if (item.value?.targetType === 'PRODUCT' && item.value.targetId) {
       try {
-        product.value = await getProductById(item.value.targetId)
+        product.value = await getAdminProductById(item.value.targetId)
       } catch (error) {
         product.value = null
       }

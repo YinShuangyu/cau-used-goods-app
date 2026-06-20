@@ -203,7 +203,7 @@ const systemEntry = computed(() => {
   return {
     unread,
     time: formatTime(latest.createdAt || latest.createTime),
-    preview: unread ? `${unread} 条未读系统通知` : (latest.content || latest.title || '暂无新的系统通知')
+    preview: unread ? `${unread} 条未读系统通知` : systemMessagePreview(latest)
   }
 })
 const visibleConversations = computed(() => conversations.value
@@ -265,6 +265,19 @@ function isConversationPreviewDeleted(item) {
 function conversationPreview(item) {
   if (isConversationPreviewDeleted(item)) return '消息已删除'
   return item.lastMessageContent || `关于「${item.productTitle || '商品'}」的沟通`
+}
+
+function isStudentAuthResultMessage(item) {
+  return item.title === '学生认证审核结果'
+    || String(item.content || '').includes('学生认证已通过')
+    || String(item.content || '').includes('学生认证未通过')
+}
+
+function systemMessagePreview(item) {
+  if (!isStudentAuthResultMessage(item)) return item.content || item.title || '暂无新的系统通知'
+  return String(item.content || '').includes('未通过')
+    ? '学生认证审核未通过'
+    : '学生认证审核通过'
 }
 
 function conversationDisplayName(item) {

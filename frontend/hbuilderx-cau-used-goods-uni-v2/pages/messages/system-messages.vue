@@ -22,11 +22,11 @@
             <view class="icon" :class="{ read: item.read }">{{ item.read ? '✓' : '!' }}</view>
             <view class="body">
               <view class="head">
-                <text class="message-title">{{ item.title }}</text>
+                <text class="message-title">{{ displayMessageTitle(item) }}</text>
                 <text class="tag" :class="{ read: item.read }">{{ item.read ? '已读' : '未读' }}</text>
               </view>
               <text class="time">{{ item.createdAt }}</text>
-              <text class="content">{{ item.content }}</text>
+              <text v-if="displayMessageContent(item)" class="content">{{ displayMessageContent(item) }}</text>
             </view>
           </view>
         </view>
@@ -44,7 +44,8 @@ import EmptyState from '../../components/EmptyState.vue'
 import { tradeService } from '../../services/trade'
 import { navigate, showError } from '../../utils/navigation'
 
-const SYSTEM_TYPES = ['ORDER_CREATED', 'ORDER_CONFIRMED', 'ORDER_CANCELED', 'ORDER_TIMEOUT', 'REPORT_HANDLED', 'SYSTEM_NOTICE']
+const ORDER_MESSAGE_TYPES = ['ORDER_CREATED', 'ORDER_CONFIRMED', 'ORDER_CANCELED', 'ORDER_TIMEOUT', 'ORDER_EXCEPTION_CLOSED']
+const SYSTEM_TYPES = [...ORDER_MESSAGE_TYPES, 'REPORT_HANDLED', 'SYSTEM_NOTICE']
 const messages = ref([])
 const marking = ref(false)
 const deletingId = ref('')
@@ -72,12 +73,64 @@ function updateBadge() {
   else uni.removeTabBarBadge({ index: 2 })
 }
 
-function open(item) {
+async function open(item) {
   if (swipedId.value === item.id) {
     swipedId.value = ''
     return
   }
+  if (isOrderProgressMessage(item)) {
+    const orderId = orderTargetId(item)
+    if (orderId) {
+      await markOneRead(item)
+      navigate('/pages/order/detail', { id: orderId })
+      return
+    }
+  }
   navigate('/pages/interaction/message-detail', { id: item.id })
+}
+
+function messageTypeOf(item) {
+  return item.type || item.messageType || ''
+}
+
+function isOrderProgressMessage(item) {
+  return item.targetType === 'ORDER'
+    || item.relatedType === 'ORDER'
+    || ORDER_MESSAGE_TYPES.includes(messageTypeOf(item))
+}
+
+function orderTargetId(item) {
+  const order = item.order || item.relatedOrder
+  return order?.id || item.targetId || item.relatedId || item.orderId
+}
+
+async function markOneRead(item) {
+  if (!item?.id || item.read) return
+  try {
+    await tradeService.markMessageRead(item.id)
+    item.read = true
+    updateBadge()
+  } catch (error) {
+    // Keep order navigation available even if read status update fails.
+  }
+}
+
+function isStudentAuthResultMessage(item) {
+  return item.title === '学生认证审核结果'
+    || String(item.content || '').includes('学生认证已通过')
+    || String(item.content || '').includes('学生认证未通过')
+}
+
+function displayMessageTitle(item) {
+  if (!isStudentAuthResultMessage(item)) return item.title
+  return String(item.content || '').includes('未通过')
+    ? '学生认证审核未通过'
+    : '学生认证审核通过'
+}
+
+function displayMessageContent(item) {
+  if (isStudentAuthResultMessage(item)) return ''
+  return item.content
 }
 
 function touchStart(event, id) {

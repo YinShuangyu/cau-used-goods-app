@@ -101,9 +101,9 @@ import {
   handleAdminAppeal,
   handleAdminReport,
   markAdminAppealProcessing,
-  markAdminReportProcessing
+  markAdminReportProcessing,
+  getAdminProductById
 } from '../../api/admin'
-import { getProductById } from '../../api/product'
 import { normalizeImage } from '../../utils/product-format'
 import { displayRelatedUserName } from '../../utils/user-format'
 
@@ -245,7 +245,7 @@ const loadTargetProducts = async (items) => {
 
   const entries = await Promise.all(productIds.map(async (id) => {
     try {
-      const product = await getProductById(id)
+      const product = await getAdminProductById(id)
       return [id, product]
     } catch (error) {
       return [id, null]
@@ -841,4 +841,3 @@ const handleCurrent = async (id, status) => {
   color: #fff;
 }
 </style>
-

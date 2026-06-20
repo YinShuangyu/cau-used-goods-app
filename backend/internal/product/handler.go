@@ -304,7 +304,7 @@ func (h *Handler) AdminListProducts(c *gin.Context) {
 		}
 	}
 
-	if status != "" && !isValidProductStatus(status) {
+	if status != "" && !isValidAdminProductStatus(status) {
 		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid status")
 		return
 	}
@@ -314,7 +314,7 @@ func (h *Handler) AdminListProducts(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.ListProducts(c.Request.Context(), ProductListInput{
+	result, err := h.service.ListAdminProducts(c.Request.Context(), ProductListInput{
 		Keyword:        keyword,
 		CategoryID:     categoryID,
 		ConditionLevel: conditionLevel,
@@ -331,6 +331,22 @@ func (h *Handler) AdminListProducts(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+func (h *Handler) AdminGetProductByID(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Error(c, http.StatusBadRequest, response.CodeBadRequest, "invalid product id")
+		return
+	}
+
+	product, err := h.service.AdminGetProductByID(c.Request.Context(), id)
+	if err != nil {
+		response.Error(c, http.StatusNotFound, response.CodeNotFound, "product not found")
+		return
+	}
+
+	response.Success(c, product)
 }
 
 func (h *Handler) GetProductByID(c *gin.Context) {

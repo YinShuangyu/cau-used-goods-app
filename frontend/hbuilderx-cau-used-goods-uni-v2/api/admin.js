@@ -100,6 +100,12 @@ export const getAdminProducts = () => {
   })
 }
 
+export const getAdminProductById = (productId) => {
+  return request({
+    url: `/admin/products/${productId}`
+  })
+}
+
 export const updateAdminProductStatus = (productId, status, extra = {}) => {
   return request({
     url: `/admin/products/${productId}/status`,

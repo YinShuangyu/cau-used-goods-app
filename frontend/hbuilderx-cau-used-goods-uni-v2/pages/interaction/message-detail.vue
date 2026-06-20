@@ -1,11 +1,22 @@
 <template>
   <view v-if="message" class="page">
-    <view class="hero">
-      <text class="eyebrow">SYSTEM MESSAGE</text>
-      <text class="hero-title">消息详情</text>
-      <text class="hero-copy">查看订单进度、举报处理和平台通知的完整内容</text>
+    <view class="hero" :class="{ 'auth-hero': isStudentAuthResult }">
+      <template v-if="isStudentAuthResult">
+        <text class="auth-title">{{ studentAuthPassed ? '学生认证通过' : '学生认证未通过' }}</text>
+      </template>
+      <template v-else>
+        <text class="eyebrow">SYSTEM MESSAGE</text>
+        <text class="hero-title">消息详情</text>
+        <text class="hero-copy">查看订单进度、举报处理和平台通知的完整内容</text>
+      </template>
     </view>
 
+    <view v-if="isStudentAuthResult" class="auth-actions">
+      <button v-if="studentAuthPassed" class="btn primary" @click="goHome">逛首页</button>
+      <button v-else class="btn primary" @click="goAppeal">去申诉</button>
+    </view>
+
+    <template v-else>
     <view class="card message-card">
       <view class="message-top">
         <view class="message-icon">系</view>
@@ -47,6 +58,7 @@
       <button v-if="relatedCard" class="btn primary" @click="openRelated">{{ relatedButtonText }}</button>
       <button class="btn plain" @click="goMessages">返回消息中心</button>
     </view>
+    </template>
   </view>
 
   <view v-else class="page loading-page">
@@ -63,6 +75,12 @@ import { BASE_URL } from '../../utils/request'
 
 const message = ref(null)
 
+const isStudentAuthResult = computed(() => (
+  message.value?.title === '学生认证审核结果'
+  || String(message.value?.content || '').includes('学生认证已通过')
+  || String(message.value?.content || '').includes('学生认证未通过')
+))
+const studentAuthPassed = computed(() => isStudentAuthResult.value && !String(message.value?.content || '').includes('未通过'))
 const statusLabel = computed(() => statusText(message.value?.status || message.value?.readStatus || (message.value?.read ? 'READ' : 'UNREAD')))
 const statusClass = computed(() => statusClassByValue(message.value?.status || message.value?.readStatus || (message.value?.read ? 'READ' : 'UNREAD')))
 const relatedButtonText = computed(() => {
@@ -207,12 +225,22 @@ function openRelated() {
 function goMessages() {
   uni.navigateBack({ delta: 1 })
 }
+
+function goHome() {
+  uni.switchTab({ url: '/pages/home/home' })
+}
+
+function goAppeal() {
+  navigate('/pages/interaction/appeal', { targetType: 'USER' })
+}
 </script>
 
 <style scoped>
 .page { min-height: 100vh; padding: 30rpx 28rpx 48rpx; background: #f5f8f6; box-sizing: border-box; }
 .loading-page { display: flex; align-items: center; justify-content: center; color: #667085; }
 .hero { padding: 34rpx 30rpx; border-radius: 28rpx; background: linear-gradient(135deg, #23734f, #3e9b72); color: #fff; box-shadow: 0 12rpx 32rpx rgba(35,115,79,.18); }
+.auth-hero { display: flex; min-height: 172rpx; align-items: center; justify-content: center; text-align: center; }
+.auth-title { color: #fff; font-size: 42rpx; font-weight: 800; }
 .eyebrow, .hero-title, .hero-copy, .title, .time, .content, .related-label, .related-title, .related-meta { display: block; }
 .eyebrow { color: rgba(255,255,255,.72); font-size: 20rpx; letter-spacing: 2rpx; }
 .hero-title { margin-top: 12rpx; font-size: 40rpx; font-weight: 800; }
@@ -243,6 +271,7 @@ function goMessages() {
 .result-label { flex-shrink: 0; color: #667085; font-size: 25rpx; }
 .result-value { color: #26342f; font-size: 26rpx; line-height: 1.6; text-align: right; }
 .actions { display: flex; gap: 18rpx; margin-top: 28rpx; }
+.auth-actions { margin-top: 34rpx; }
 .btn { flex: 1; height: 78rpx; line-height: 78rpx; border-radius: 999rpx; font-size: 26rpx; }
 .btn::after { border: 0; }
 .primary { background: #23734f; color: #fff; }

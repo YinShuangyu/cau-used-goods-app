@@ -41,6 +41,13 @@ type Product struct {
 	Images         []string `json:"images"`
 }
 
+type ProductNoticeInfo struct {
+	ID       uint64
+	SellerID uint64
+	Title    string
+	Status   string
+}
+
 func (r *Repository) ListCategories(ctx context.Context) ([]Category, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, parent_id, sort_order, status
@@ -222,6 +229,7 @@ type ListProductsInput struct {
 	Sort           string
 	Page           int
 	PageSize       int
+	IncludeDeleted bool
 }
 
 type ProductListResult struct {
@@ -232,6 +240,17 @@ type ProductListResult struct {
 }
 
 func (r *Repository) ListProducts(ctx context.Context, input ListProductsInput) (*ProductListResult, error) {
+	input.Status = "ON_SALE"
+	input.IncludeDeleted = false
+	return r.listProducts(ctx, input)
+}
+
+func (r *Repository) ListAdminProducts(ctx context.Context, input ListProductsInput) (*ProductListResult, error) {
+	input.IncludeDeleted = true
+	return r.listProducts(ctx, input)
+}
+
+func (r *Repository) listProducts(ctx context.Context, input ListProductsInput) (*ProductListResult, error) {
 	if input.Page <= 0 {
 		input.Page = 1
 	}
@@ -241,11 +260,16 @@ func (r *Repository) ListProducts(ctx context.Context, input ListProductsInput) 
 	if input.PageSize > 50 {
 		input.PageSize = 50
 	}
-	input.Status = "ON_SALE"
 
-	where := ` WHERE p.is_deleted = 0 `
-	args := []any{input.Status}
-	where += " AND p.status = ? "
+	where := ` WHERE 1 = 1 `
+	args := []any{}
+	if !input.IncludeDeleted {
+		where += " AND p.is_deleted = 0 "
+	}
+	if input.Status != "" {
+		where += " AND p.status = ? "
+		args = append(args, input.Status)
+	}
 
 	for _, term := range splitProductSearchKeyword(input.Keyword) {
 		where += " AND (p.title LIKE ? OR p.description LIKE ? OR c.name LIKE ?) "
@@ -432,6 +456,52 @@ func (r *Repository) GetProductByID(ctx context.Context, id uint64) (*Product, e
 		       favorite_count, DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s')
 		FROM products
 		WHERE id = ? AND is_deleted = 0 AND status = 'ON_SALE'
+	`, id).Scan(
+		&p.ID, &p.SellerID, &p.CategoryID, &p.Title, &desc, &originalPrice,
+		&p.Price, &condition, &location, &p.Status, &p.ViewCount,
+		&p.FavoriteCount, &p.CreateTime,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	fillProductNullableFields(&p, desc, originalPrice, condition, location)
+
+	images, err := r.ListProductImages(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	p.Images = images
+
+	return &p, nil
+}
+
+func (r *Repository) GetProductNoticeInfo(ctx context.Context, productID uint64) (*ProductNoticeInfo, error) {
+	var item ProductNoticeInfo
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, seller_id, title, status
+		FROM products
+		WHERE id = ? AND is_deleted = 0
+	`, productID).Scan(&item.ID, &item.SellerID, &item.Title, &item.Status)
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (r *Repository) AdminGetProductByID(ctx context.Context, id uint64) (*Product, error) {
+	var p Product
+	var desc sql.NullString
+	var originalPrice sql.NullFloat64
+	var condition sql.NullString
+	var location sql.NullString
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, seller_id, category_id, title, description, original_price,
+		       price, condition_level, meet_location, status, view_count,
+		       favorite_count, DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s')
+		FROM products
+		WHERE id = ?
 	`, id).Scan(
 		&p.ID, &p.SellerID, &p.CategoryID, &p.Title, &desc, &originalPrice,
 		&p.Price, &condition, &location, &p.Status, &p.ViewCount,

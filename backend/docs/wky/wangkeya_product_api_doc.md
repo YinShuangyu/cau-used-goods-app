@@ -2,7 +2,7 @@
 
 ## 1. 文档说明
 
-本文档用于说明 CAU 校园二手交易平台中王珂雅负责的商品相关后端接口，覆盖商品分类、商品列表、搜索筛选、商品详情、商品发布、商品编辑、商品上下架、商品删除、商品图片上传与绑定、AI 商品优化、收藏接口、浏览量统计、收藏量统计以及管理员商品统计接口。
+本文档用于说明 CAU 校园二手交易平台中王珂雅负责的商品相关后端接口，覆盖商品分类、商品列表、搜索筛选、商品详情、商品发布、商品编辑、商品上下架、商品删除、商品图片上传与绑定、AI 商品优化、收藏接口、浏览量统计、收藏量统计、管理员商品管理接口以及管理员商品统计接口。
 
 - 模块负责人：王珂雅
 - 后端基础地址：`http://127.0.0.1:8080`
@@ -698,9 +698,106 @@ curl "http://127.0.0.1:8080/stats/products/overview" ^
 
 ---
 
-## 14. 删除商品接口
+## 14. 管理员商品管理接口
 
-### 14.1 删除商品
+### 14.1 管理员商品列表
+
+- 请求方式：`GET`
+- 接口路径：`/admin/products`
+- 是否需要登录：是
+- 权限要求：管理员
+- 功能说明：后台管理列表接口，不复用公开商品列表规则。未传 `status` 时返回全部商品状态；传入 `status` 时可筛选 `ON_SALE`、`OFF_SHELF`、`LOCKED`、`SOLD`、`DELETED`。
+
+#### 请求示例
+
+```bash
+curl "http://127.0.0.1:8080/admin/products?page=1&pageSize=50&sort=newest" ^
+-H "Authorization: Bearer <admin_token>"
+```
+
+#### 返回说明
+
+返回结构与公开商品列表一致：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "list": [
+      {
+        "id": 7,
+        "sellerId": 6,
+        "categoryId": 2,
+        "title": "浏览收藏统计测试商品",
+        "price": 120,
+        "status": "OFF_SHELF",
+        "viewCount": 1,
+        "favoriteCount": 1,
+        "createTime": "2026-06-10 10:06:00",
+        "images": []
+      }
+    ],
+    "page": 1,
+    "pageSize": 50,
+    "total": 1
+  }
+}
+```
+
+### 14.2 管理员商品详情
+
+- 请求方式：`GET`
+- 接口路径：`/admin/products/:id`
+- 是否需要登录：是
+- 权限要求：管理员
+- 功能说明：后台商品详情接口，可查看非在售商品。该接口不会增加 `view_count`，用于管理员上下架、举报处理、申诉处理等管理场景。
+
+#### 请求示例
+
+```bash
+curl "http://127.0.0.1:8080/admin/products/7" ^
+-H "Authorization: Bearer <admin_token>"
+```
+
+#### 返回示例
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": 7,
+    "sellerId": 6,
+    "categoryId": 2,
+    "title": "浏览收藏统计测试商品",
+    "description": "用于测试浏览量和收藏量统计",
+    "originalPrice": 199,
+    "price": 120,
+    "conditionLevel": "九成新",
+    "meetLocation": "图书馆门口",
+    "status": "OFF_SHELF",
+    "viewCount": 1,
+    "favoriteCount": 1,
+    "createTime": "2026-06-10 10:06:00",
+    "images": []
+  }
+}
+```
+
+### 14.3 管理员修改商品状态
+
+- 请求方式：`PUT`
+- 接口路径：`/admin/products/:id/status`
+- 是否需要登录：是
+- 权限要求：管理员
+- 功能说明：管理员可将商品状态修改为 `ON_SALE`、`OFF_SHELF`、`LOCKED`、`SOLD` 或 `DELETED`。如果处理来源于举报或申诉，可同时传入 `relatedType` 和 `relatedId` 写入管理员日志关联记录。
+
+---
+
+## 15. 删除商品接口
+
+### 15.1 删除商品
 
 - 请求方式：`DELETE`
 - 接口路径：`/products/:id`
@@ -739,7 +836,7 @@ curl -X DELETE http://127.0.0.1:8080/products/6 ^
 
 ---
 
-## 15. 与订单模块的商品状态联动说明
+## 16. 与订单模块的商品状态联动说明
 
 商品模块提供商品状态字段，订单模块在创建订单、成交、取消等流程中可联动更新商品状态。例如：
 

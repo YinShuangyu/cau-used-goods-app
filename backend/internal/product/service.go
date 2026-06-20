@@ -8,6 +8,7 @@ import (
 
 	"cau-used-goods-app/backend/internal/admin"
 	"cau-used-goods-app/backend/internal/db"
+	"cau-used-goods-app/backend/internal/message"
 	"cau-used-goods-app/backend/internal/sensitive"
 )
 
@@ -15,13 +16,15 @@ type Service struct {
 	repo             *Repository
 	sensitiveService *sensitive.Service
 	adminLogger      *admin.Service
+	messageService   *message.Service
 }
 
-func NewService(repo *Repository, sensitiveService *sensitive.Service, adminLogger *admin.Service) *Service {
+func NewService(repo *Repository, sensitiveService *sensitive.Service, adminLogger *admin.Service, messageService *message.Service) *Service {
 	return &Service{
 		repo:             repo,
 		sensitiveService: sensitiveService,
 		adminLogger:      adminLogger,
+		messageService:   messageService,
 	}
 }
 
@@ -219,6 +222,20 @@ func (s *Service) ListProducts(ctx context.Context, input ProductListInput) (*Pr
 	})
 }
 
+func (s *Service) ListAdminProducts(ctx context.Context, input ProductListInput) (*ProductListResult, error) {
+	return s.repo.ListAdminProducts(ctx, ListProductsInput{
+		Keyword:        input.Keyword,
+		CategoryID:     input.CategoryID,
+		ConditionLevel: input.ConditionLevel,
+		Status:         input.Status,
+		MinPrice:       input.MinPrice,
+		MaxPrice:       input.MaxPrice,
+		Sort:           input.Sort,
+		Page:           input.Page,
+		PageSize:       input.PageSize,
+	})
+}
+
 type ProductViewer struct {
 	UserID uint64
 	Role   string
@@ -229,6 +246,13 @@ func (s *Service) GetProductByID(ctx context.Context, id uint64, viewer ProductV
 		return nil, err
 	}
 	return s.repo.GetProductByID(ctx, id)
+}
+
+func (s *Service) AdminGetProductByID(ctx context.Context, id uint64) (*Product, error) {
+	if id == 0 {
+		return nil, fmt.Errorf("productId is required")
+	}
+	return s.repo.AdminGetProductByID(ctx, id)
 }
 
 func (s *Service) ListMyProducts(ctx context.Context, sellerID uint64) ([]Product, error) {
@@ -310,7 +334,11 @@ func (s *Service) AdminUpdateProductStatus(ctx context.Context, input AdminUpdat
 	if input.Reason != "" {
 		description = fmt.Sprintf("%s: %s", description, input.Reason)
 	}
-	return db.WithTx(ctx, func(tx *sql.Tx) error {
+	productInfo, err := s.repo.GetProductNoticeInfo(ctx, input.ProductID)
+	if err != nil {
+		return fmt.Errorf("product not found")
+	}
+	if err := db.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := s.repo.ValidateRelatedRecordTx(ctx, tx, relatedType, relatedID, input.ProductID); err != nil {
 			return err
 		}
@@ -318,6 +346,45 @@ func (s *Service) AdminUpdateProductStatus(ctx context.Context, input AdminUpdat
 			return err
 		}
 		return s.logAdminActionTx(ctx, tx, input.AdminID, admin.OperationUpdateProductStatus, admin.TargetTypeProduct, input.ProductID, description, input.IPAddress, relatedTypePtr(relatedType), relatedIDPtr(relatedID))
+	}); err != nil {
+		return err
+	}
+	s.notifyAdminProductStatusChanged(ctx, input, productInfo)
+	return nil
+}
+
+func (s *Service) notifyAdminProductStatusChanged(ctx context.Context, input AdminUpdateProductStatusInput, productInfo *ProductNoticeInfo) {
+	if s.messageService == nil || productInfo == nil || productInfo.SellerID == 0 {
+		return
+	}
+
+	var title string
+	var content string
+	switch input.Status {
+	case "OFF_SHELF":
+		title = "商品下架通知"
+		content = fmt.Sprintf("你的商品「%s」已被管理员下架。", productInfo.Title)
+	case "ON_SALE":
+		title = "商品上架通知"
+		content = fmt.Sprintf("你的商品「%s」已被管理员上架。", productInfo.Title)
+	default:
+		return
+	}
+	if input.Reason != "" {
+		content = fmt.Sprintf("%s原因：%s", content, input.Reason)
+	}
+
+	relatedType := message.RelatedTypeProduct
+	relatedID := productInfo.ID
+	senderID := input.AdminID
+	_, _ = s.messageService.Create(ctx, message.CreateMessageInput{
+		ReceiverID:  productInfo.SellerID,
+		SenderID:    &senderID,
+		MessageType: message.MessageTypeSystemNotice,
+		Title:       title,
+		Content:     content,
+		RelatedType: &relatedType,
+		RelatedID:   &relatedID,
 	})
 }
 

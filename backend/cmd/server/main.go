@@ -65,7 +65,7 @@ func main() {
 	messageHandler := message.NewHandler(messageService)
 
 	productRepo := product.NewRepository(db.DB())
-	productService := product.NewService(productRepo, sensitiveService, adminService)
+	productService := product.NewService(productRepo, sensitiveService, adminService, messageService)
 	productHandler := product.NewHandler(productService)
 
 	orderRepo := order.NewRepository(db.DB())

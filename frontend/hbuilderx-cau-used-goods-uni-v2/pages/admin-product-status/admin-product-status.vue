@@ -24,8 +24,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { updateAdminProductStatus } from '../../api/admin'
-import { getProductById } from '../../api/product'
+import { getAdminProductById, updateAdminProductStatus } from '../../api/admin'
 import { normalizeImage } from '../../utils/product-format'
 
 const product = ref({})
@@ -47,7 +46,7 @@ const load = async () => {
     return
   }
   try {
-    product.value = await getProductById(productId.value)
+    product.value = await getAdminProductById(productId.value)
   } catch (error) {
     uni.showToast({ title: error.message || '商品加载失败', icon: 'none' })
   }
@@ -62,7 +61,7 @@ const changeStatus = async (status) => {
     }
     await updateAdminProductStatus(productId.value, status, extra)
     uni.showToast({ title: status === 'ON_SALE' ? '已上架' : '已下架', icon: 'success' })
-    load()
+    product.value = { ...product.value, status }
   } catch (error) {
     uni.showToast({ title: error.message || '商品状态更新失败', icon: 'none' })
   }

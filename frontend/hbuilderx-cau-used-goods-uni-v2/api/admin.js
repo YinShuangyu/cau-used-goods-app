@@ -94,9 +94,10 @@ export const getAdminUserReports = (userId, params = {}) => {
   return request({ url: `/admin/users/${userId}/reports?page=${page}&pageSize=${pageSize}` })
 }
 
-export const getAdminProducts = () => {
+export const getAdminProducts = (params = {}) => {
+  const query = toQuery({ page: 1, pageSize: 50, sort: 'newest', ...params })
   return request({
-    url: '/admin/products?page=1&pageSize=50&sort=newest'
+    url: `/admin/products?${query}`
   })
 }
 
@@ -245,9 +246,14 @@ export const updateAnnouncementStatus = (id, status) => {
   })
 }
 
-export const getAdminOrders = (status = 'ALL') => {
-  const query = status && status !== 'ALL' ? `?status=${status}&page=1&pageSize=50` : '?page=1&pageSize=50'
-  return request({ url: `/admin/orders${query}` })
+export const getAdminOrders = (status = 'ALL', params = {}) => {
+  const query = toQuery({
+    ...(status && status !== 'ALL' ? { status } : {}),
+    page: 1,
+    pageSize: 50,
+    ...params
+  })
+  return request({ url: `/admin/orders?${query}` })
 }
 
 export const updateAdminOrderStatus = (orderId, status, reason = '') => {

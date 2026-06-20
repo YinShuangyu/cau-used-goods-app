@@ -1,5 +1,6 @@
 ﻿import { BASE_URL } from '../utils/request'
 import * as api from '../api/trade'
+import { getAdminOrders } from '../api/admin'
 import { REPORT_REASON, TARGET_TYPE } from '../utils/constants'
 import { displayRelatedUserName } from '../utils/user-format'
 
@@ -104,6 +105,13 @@ export const tradeService = {
   createAppointment: async (data) => normalizeOrder(await api.createAppointment(data)),
   getOrders: async (role) => (await api.getOrders(role)).items.map(normalizeOrder),
   getOrder: async (id) => normalizeOrder(await api.getOrder(id)),
+  getAdminOrder: async (id) => {
+    const result = await getAdminOrders('ALL', { pageSize: 200 })
+    const list = result?.items || []
+    const order = list.find((item) => Number(item.id) === Number(id))
+    if (!order) throw new Error('订单不存在或不在当前管理员列表中')
+    return normalizeOrder(order)
+  },
   changeOrderStatus: async (id, action, data) => normalizeOrder(await api.changeOrderStatus(id, action, data)),
   getFavorites: async () => (await api.getFavorites()).items.map((item) => normalizeProduct({
     id: item.productId,

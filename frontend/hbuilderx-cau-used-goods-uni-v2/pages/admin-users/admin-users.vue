@@ -43,7 +43,6 @@
       </view>
 
       <view class="actions">
-        <button class="mini" @click="openUserHome(item)">用户主页</button>
         <button class="mini" @click="toggleRelated(item)">关联信息</button>
         <button class="mini" @click="goStudentAuth(item)">认证状态</button>
         <button v-if="item.accountStatus !== 'DISABLED'" class="mini warn" @click="changeStatus(item, 'DISABLED')">禁用</button>

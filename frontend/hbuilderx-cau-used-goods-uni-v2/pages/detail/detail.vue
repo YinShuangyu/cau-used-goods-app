@@ -41,29 +41,36 @@
       <text class="seller-arrow">›</text>
     </view>
 
-    <view v-if="readonlyMode" class="readonly-tip">该商品仅可查看</view>
+    <view v-if="readonlyMode" class="readonly-tip">{{ adminView ? '管理员只读查看，可在底部调整商品状态' : '该商品仅可查看' }}</view>
 
-    <view class="bottom">
-      <button
-        class="icon-button favorite"
-        :class="{ active: isFavorite }"
-        :disabled="readonlyMode || isOwnProduct"
-        @click="toggleFavorite"
-      >
-        {{ isFavorite ? '★' : '☆' }}
-      </button>
-      <button
-        class="icon-button report"
-        :class="{ disabled: isOwnProduct || readonlyMode }"
-        :disabled="isOwnProduct || readonlyMode"
-        @click="report"
-      >
-        !
-      </button>
-      <button class="chat" :disabled="readonlyMode || isOwnProduct" @click="chat">聊一聊</button>
-      <button class="primary" :disabled="readonlyMode || isOwnProduct || product.status !== 'ON_SALE'" @click="reserve">
-        {{ actionText }}
-      </button>
+    <view class="bottom" :class="{ admin: adminView }">
+      <template v-if="adminView">
+        <button v-if="product.status === 'ON_SALE'" class="admin-action danger" @click="changeAdminProductStatus('OFF_SHELF')">下架商品</button>
+        <button v-else-if="product.status === 'OFF_SHELF'" class="admin-action primary-admin" @click="changeAdminProductStatus('ON_SALE')">上架商品</button>
+        <button v-else class="admin-action disabled" disabled>{{ statusText }}</button>
+      </template>
+      <template v-else>
+        <button
+          class="icon-button favorite"
+          :class="{ active: isFavorite }"
+          :disabled="readonlyMode || isOwnProduct"
+          @click="toggleFavorite"
+        >
+          {{ isFavorite ? '★' : '☆' }}
+        </button>
+        <button
+          class="icon-button report"
+          :class="{ disabled: isOwnProduct || readonlyMode }"
+          :disabled="isOwnProduct || readonlyMode"
+          @click="report"
+        >
+          !
+        </button>
+        <button class="chat" :disabled="readonlyMode || isOwnProduct" @click="chat">聊一聊</button>
+        <button class="primary" :disabled="readonlyMode || isOwnProduct || product.status !== 'ON_SALE'" @click="reserve">
+          {{ actionText }}
+        </button>
+      </template>
     </view>
   </view>
 
@@ -82,6 +89,7 @@ import {
   listCategories,
   removeFavorite
 } from '../../api/product'
+import { updateAdminProductStatus } from '../../api/admin'
 import { createOrGetConversation } from '../../api/chat'
 import { getPublicProfile } from '../../api/user'
 import { buildCategoryMap, formatPrice, formatProduct, getStatusText, normalizeImage } from '../../utils/product-format'
@@ -94,6 +102,9 @@ const product = ref(null)
 const isFavorite = ref(false)
 const failedImages = ref([])
 const readonlyMode = ref(false)
+const adminView = ref(false)
+const relatedType = ref('')
+const relatedId = ref('')
 const bannedSellerBlocked = ref(false)
 const sellerProfile = ref(null)
 const sellerAvatarFile = ref('')
@@ -163,6 +174,35 @@ function ensureVerified() {
     return false
   }
   return true
+}
+
+function adminRelatedPayload() {
+  const payload = {}
+  if (relatedType.value && relatedId.value) {
+    payload.relatedType = relatedType.value
+    payload.relatedId = Number(relatedId.value)
+  }
+  return payload
+}
+
+function changeAdminProductStatus(status) {
+  if (!adminView.value || !product.value?.id) return
+  const action = status === 'ON_SALE' ? '上架商品' : '下架商品'
+  uni.showModal({
+    title: action,
+    content: `确认${action}吗？`,
+    success: async (res) => {
+      if (!res.confirm) return
+      try {
+        await updateAdminProductStatus(product.value.id, status, adminRelatedPayload())
+        product.value = { ...product.value, status }
+        uni.setStorageSync(`product-detail-cache-${product.value.id}`, product.value)
+        toast(status === 'ON_SALE' ? '已上架' : '已下架', 'success')
+      } catch (error) {
+        toast(error.message || '商品状态更新失败')
+      }
+    }
+  })
 }
 
 function adjustFavoriteCount(delta) {
@@ -269,6 +309,30 @@ async function chat() {
   }
 }
 
+function applySnapshotOverrides(record, options = {}) {
+  const next = { ...record }
+  if (options.snapshotTitle) next.title = decodeURIComponent(options.snapshotTitle)
+  if (options.snapshotPrice !== undefined && options.snapshotPrice !== '') {
+    next.price = options.snapshotPrice
+    next.priceText = formatPrice(options.snapshotPrice)
+  }
+  if (options.snapshotStatus) next.status = options.snapshotStatus
+  if (options.snapshotImage) {
+    const image = normalizeImage(decodeURIComponent(options.snapshotImage))
+    next.images = image ? [image] : (next.images || [])
+    next.coverImage = image || next.coverImage
+  }
+  if (options.snapshotSellerId || options.snapshotSellerName) {
+    next.sellerId = options.snapshotSellerId || next.sellerId
+    next.seller = {
+      ...(next.seller || {}),
+      id: options.snapshotSellerId || next.seller?.id || next.sellerId,
+      nickname: options.snapshotSellerName ? decodeURIComponent(options.snapshotSellerName) : next.seller?.nickname
+    }
+  }
+  return next
+}
+
 function buildSnapshotProduct(id, options = {}) {
   const image = options.snapshotImage ? decodeURIComponent(options.snapshotImage) : ''
   const title = options.snapshotTitle ? decodeURIComponent(options.snapshotTitle) : '订单商品'
@@ -308,6 +372,9 @@ function isBlockedSellerSnapshot(options = {}) {
 onLoad(async (options) => {
   const { id } = options
   readonlyMode.value = options.readonly === '1' || options.readonly === 1
+  adminView.value = options.adminView === '1' || options.adminView === 1
+  relatedType.value = String(options.relatedType || '').toUpperCase()
+  relatedId.value = options.relatedId || ''
   bannedSellerBlocked.value = isBlockedSellerSnapshot(options)
   if (!id) {
     toast('商品不存在')
@@ -317,7 +384,9 @@ onLoad(async (options) => {
 
   try {
     const [detail, categories] = await Promise.all([getProductById(id), listCategories()])
-    product.value = formatProduct(detail, buildCategoryMap(categories))
+    product.value = adminView.value
+      ? applySnapshotOverrides(formatProduct(detail, buildCategoryMap(categories)), options)
+      : formatProduct(detail, buildCategoryMap(categories))
     uni.setStorageSync(`product-detail-cache-${id}`, product.value)
     addBrowseHistory(product.value)
     failedImages.value = []
@@ -326,7 +395,7 @@ onLoad(async (options) => {
   } catch (error) {
     const cached = uni.getStorageSync(`product-detail-cache-${id}`)
     if (cached) {
-      product.value = cached
+      product.value = adminView.value ? applySnapshotOverrides(cached, options) : cached
       failedImages.value = []
       await loadSellerProfile()
       await loadFavoriteState(id)
@@ -369,12 +438,17 @@ onLoad(async (options) => {
 .seller-arrow { color: #98a2b3; font-size: 42rpx; }
 .readonly-tip { margin: 20rpx; padding: 20rpx 24rpx; border-radius: 16rpx; background: #fff7e6; color: #a15c00; font-size: 26rpx; }
 .bottom { position: fixed; right: 0; bottom: 0; left: 0; display: flex; gap: 12rpx; padding: 16rpx 20rpx calc(16rpx + env(safe-area-inset-bottom)); background: #fff; }
+.bottom.admin { padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom)); }
 .icon-button, .chat, .primary { height: 74rpx; border-radius: 999rpx; font-size: 26rpx; line-height: 74rpx; }
 .icon-button { width: 84rpx; padding: 0; color: #4b5a52; background: #f2f5f3; }
 .favorite.active { color: #f59e0b; background: #fff7e6; }
 .report.disabled { color: #c3cac6; }
 .chat { flex: 1; color: #23734f; background: #e7f4ec; }
 .primary { flex: 1.4; color: #fff; background: #23734f; }
+.admin-action { width: 100%; height: 80rpx; border-radius: 16rpx; font-size: 28rpx; font-weight: 700; line-height: 80rpx; }
+.admin-action.primary-admin { color: #fff; background: #23734f; }
+.admin-action.danger { color: #ef4444; background: #fee2e2; }
+.admin-action.disabled { color: #667085; background: #eef2f6; }
 button[disabled] { opacity: .48; }
 .loading-page { display: flex; align-items: center; justify-content: center; color: #667085; }
 .blocked-page { display: flex; align-items: center; justify-content: center; padding: 48rpx; box-sizing: border-box; }

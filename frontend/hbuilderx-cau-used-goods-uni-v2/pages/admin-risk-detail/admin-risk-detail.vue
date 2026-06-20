@@ -28,18 +28,26 @@
         <text class="target-arrow">›</text>
       </view>
 
-      <view v-else-if="targetManageUrl" class="target-product" @click="goTargetManage">
-        <view class="target-image placeholder">{{ targetText(item.targetType) }}</view>
+      <view v-else-if="targetEntryVisible" class="target-product" @click="goTargetManage">
+        <image v-if="targetEntryImage" class="target-image" :src="targetEntryImage" mode="aspectFill" />
+        <view v-else class="target-image placeholder">{{ targetEntryPlaceholder }}</view>
         <view class="target-main">
-          <view class="target-title">查看{{ targetText(item.targetType) }}管理</view>
-          <view class="target-meta">{{ targetText(item.targetType) }} #{{ item.targetId }}</view>
+          <view class="target-title">{{ targetEntryTitle }}</view>
+          <view class="target-meta">{{ targetEntryMeta }}</view>
         </view>
         <text class="target-arrow">›</text>
       </view>
 
       <view class="section-title">具体信息</view>
-      <view class="detail-row"><text>对象类型</text><text>{{ targetText(item.targetType) }}</text></view>
-      <view class="detail-row"><text>对象 ID</text><text>#{{ item.targetId }}</text></view>
+      <template v-if="item.targetType === 'PRODUCT'">
+        <view class="detail-row"><text>商品名称</text><text>{{ productInfoTitle }}</text></view>
+        <view class="detail-row"><text>商品状态</text><text>{{ productInfoStatus }}</text></view>
+        <view class="detail-row"><text>商品价格</text><text>￥{{ productInfoPrice }}</text></view>
+      </template>
+      <template v-else>
+        <view class="detail-row"><text>对象类型</text><text>{{ targetText(item.targetType) }}</text></view>
+        <view class="detail-row"><text>对象 ID</text><text>#{{ item.targetId }}</text></view>
+      </template>
       <view class="detail-row"><text>当前状态</text><text>{{ statusText(item.status) }}</text></view>
       <view class="detail-row"><text>{{ mode === 'REPORT' ? '举报原因' : '申诉理由' }}</text><text>{{ itemTitle(item) }}</text></view>
       <view v-if="item.handleTime" class="detail-row"><text>处理时间</text><text>{{ shortTime(item.handleTime) }}</text></view>
@@ -80,6 +88,7 @@ import { computed, reactive, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
 import {
   getAdminAppeals,
+  getAdminOrders,
   getAdminReports,
   handleAdminAppeal,
   handleAdminReport,
@@ -87,6 +96,7 @@ import {
   markAdminReportProcessing,
   getAdminProductById
 } from '../../api/admin'
+import { getPublicProfile } from '../../api/user'
 import { normalizeImage } from '../../utils/product-format'
 import { displayRelatedUserName } from '../../utils/user-format'
 
@@ -94,6 +104,8 @@ const mode = ref('REPORT')
 const id = ref(0)
 const item = ref(null)
 const product = ref(null)
+const order = ref(null)
+const targetUser = ref(null)
 const loading = ref(false)
 const submitting = ref(false)
 const reasonModal = reactive({ visible: false, reason: '', note: '' })
@@ -103,11 +115,43 @@ const reasonOptions = computed(() => mode.value === 'REPORT'
   : ['申诉材料不足', '原举报处理结论无误', '未提供有效证明', '申诉理由与处理结果无关', '存在重复申诉'])
 
 const targetProduct = computed(() => item.value?.targetType === 'PRODUCT' ? product.value : null)
+const targetOrder = computed(() => item.value?.targetType === 'ORDER' ? order.value : null)
+const productInfoTitle = computed(() => targetProduct.value?.title || `商品 #${item.value?.targetId || ''}`)
+const productInfoPrice = computed(() => targetProduct.value?.price ?? 0)
+const productInfoStatus = computed(() => productStatusText(targetProduct.value?.status))
+const targetEntryVisible = computed(() => ['USER', 'PRODUCT', 'ORDER'].includes(item.value?.targetType) || Boolean(targetManageUrl.value))
+const targetUserAvatar = computed(() => item.value?.targetType === 'USER' ? normalizeImage(targetUser.value?.avatarUrl || targetUser.value?.avatar || targetUser.value?.avatar_url || '') : '')
+const targetUserName = computed(() => targetUser.value?.nickname || targetUser.value?.realName || targetUser.value?.real_name || '')
+const targetEntryImage = computed(() => {
+  if (item.value?.targetType === 'USER') return targetUserAvatar.value
+  if (item.value?.targetType === 'ORDER') return orderProductImage(targetOrder.value)
+  return ''
+})
+const targetEntryPlaceholder = computed(() => {
+  if (item.value?.targetType === 'USER') return targetUserName.value ? targetUserName.value.slice(0, 1) : '用户'
+  if (item.value?.targetType === 'ORDER') return '订单'
+  return targetText(item.value?.targetType)
+})
+const targetEntryTitle = computed(() => {
+  if (item.value?.targetType === 'USER') return '查看用户主页'
+  if (item.value?.targetType === 'PRODUCT') return '查看商品详情'
+  if (item.value?.targetType === 'ORDER') return '查看订单详情'
+  return `查看${targetText(item.value?.targetType)}管理`
+})
+const targetEntryMeta = computed(() => {
+  if (item.value?.targetType === 'USER') {
+    return targetUserName.value || '用户主页'
+  }
+  if (item.value?.targetType === 'ORDER') {
+    const buyerName = displayRelatedUserName(targetOrder.value || {}, 'buyer', '买家')
+    const productTitle = targetOrder.value?.productTitleSnapshot || targetOrder.value?.product?.title || '订单商品'
+    return `${buyerName} · ${productTitle}`
+  }
+  return `${targetText(item.value?.targetType)} #${item.value?.targetId}`
+})
 const targetManageUrl = computed(() => {
   if (!item.value) return ''
   const map = {
-    USER: '/pages/admin-users/admin-users',
-    ORDER: '/pages/admin-orders/admin-orders'
   }
   return map[item.value.targetType] || ''
 })
@@ -129,12 +173,20 @@ const load = async () => {
     const list = result?.items || []
     item.value = list.find((record) => Number(record.id) === id.value) || null
     product.value = null
+    order.value = null
+    targetUser.value = null
     if (item.value?.targetType === 'PRODUCT' && item.value.targetId) {
       try {
         product.value = await getAdminProductById(item.value.targetId)
       } catch (error) {
         product.value = null
       }
+    }
+    if (item.value?.targetType === 'USER' && item.value.targetId) {
+      targetUser.value = await getPublicProfile(item.value.targetId).catch(() => null)
+    }
+    if (item.value?.targetType === 'ORDER' && item.value.targetId) {
+      order.value = await findAdminOrder(item.value.targetId).catch(() => null)
     }
   } catch (error) {
     uni.showToast({ title: error.message || '加载失败', icon: 'none' })
@@ -153,13 +205,77 @@ const actorName = (record) => mode.value === 'REPORT'
   : displayRelatedUserName(record, 'appellant', `用户${record.appellantId}`)
 const shortTime = (value) => value ? String(value).replace('T', ' ').slice(0, 16) : ''
 const canHandle = (status) => ['PENDING', 'PROCESSING'].includes(status)
-const productCover = (record) => normalizeImage(record?.images?.[0] || '')
+const productCover = (record) => normalizeImage(
+  record?.imageUrl
+  || record?.image_url
+  || record?.coverImage
+  || record?.cover_image
+  || record?.image
+  || record?.productImage
+  || record?.product_image
+  || record?.images?.[0]
+  || ''
+)
 const productStatusText = (status) => ({ ON_SALE: '在售', OFF_SHELF: '已下架', LOCKED: '交易锁定', SOLD: '已售出', DELETED: '已删除' }[status] || status || '未知')
+const findAdminOrder = async (orderId) => {
+  const result = await getAdminOrders('ALL', { pageSize: 200 })
+  const list = Array.isArray(result) ? result : (result?.items || result?.list || result?.records || [])
+  return list.find((record) => Number(record.id) === Number(orderId)) || null
+}
+const orderProductImage = (record) => normalizeImage(
+  record?.productImage
+  || record?.productImageUrl
+  || record?.productImageSnapshot
+  || record?.productCover
+  || record?.productCoverImage
+  || record?.coverImage
+  || record?.imageUrl
+  || record?.product?.image
+  || record?.product?.imageUrl
+  || record?.product?.coverImage
+  || record?.product?.images?.[0]
+  || ''
+)
 
 const previewImage = (current, urls) => uni.previewImage({ current, urls: urls.map((url) => normalizeImage(url)) })
 const relatedQuery = () => `relatedType=${mode.value}&relatedId=${id.value}`
-const goProduct = (productId) => productId && uni.navigateTo({ url: `/pages/admin-product-status/admin-product-status?id=${productId}&${relatedQuery()}` })
+const productDetailUrl = (productId, record = null) => {
+  if (!productId) return ''
+  const params = [`id=${productId}`, 'readonly=1', 'adminView=1', relatedQuery()]
+  if (record?.title) params.push(`snapshotTitle=${encodeURIComponent(record.title)}`)
+  if (record?.price !== undefined && record?.price !== null) params.push(`snapshotPrice=${record.price}`)
+  if (record?.status) params.push(`snapshotStatus=${record.status}`)
+  const image = productCover(record)
+  if (image) params.push(`snapshotImage=${encodeURIComponent(image)}`)
+  const sellerId = record?.sellerId || record?.seller?.id
+  const sellerName = record?.sellerName || record?.seller?.nickname
+  if (sellerId) params.push(`snapshotSellerId=${sellerId}`)
+  if (sellerName) params.push(`snapshotSellerName=${encodeURIComponent(sellerName)}`)
+  return `/pages/detail/detail?${params.join('&')}`
+}
+const goProduct = (productId) => {
+  const url = productDetailUrl(productId, targetProduct.value)
+  if (url) uni.navigateTo({ url })
+}
+const orderDetailUrl = (orderId) => {
+  if (!orderId) return ''
+  return `/pages/order/detail?id=${orderId}&adminView=1&readonly=1&${relatedQuery()}`
+}
 const goTargetManage = () => {
+  if (item.value?.targetType === 'USER' && item.value.targetId) {
+    uni.navigateTo({ url: `/pages/user-profile/user-profile?id=${item.value.targetId}&adminView=1&${relatedQuery()}` })
+    return
+  }
+  if (item.value?.targetType === 'PRODUCT' && item.value.targetId) {
+    const url = productDetailUrl(item.value.targetId)
+    if (url) uni.navigateTo({ url })
+    return
+  }
+  if (item.value?.targetType === 'ORDER' && item.value.targetId) {
+    const url = orderDetailUrl(item.value.targetId)
+    if (url) uni.navigateTo({ url })
+    return
+  }
   if (!targetManageUrl.value) return
   uni.navigateTo({ url: `${targetManageUrl.value}?${relatedQuery()}` })
 }

@@ -44,7 +44,20 @@
       </view>
     </view>
 
-    <view class="actions">
+    <view v-if="false && adminView" class="notice">
+      管理员只读查看订单，如需异常关闭请在风险处理入口继续操作。
+    </view>
+
+    <view v-if="adminView" class="notice">
+      管理员只读查看订单，可对待确认或待面交订单执行异常关闭。
+    </view>
+
+    <view v-if="adminView" class="actions admin-actions">
+      <button v-if="canAdminExceptionClose" class="btn btn-danger" :loading="submitting" @click="openCloseModal">异常关闭</button>
+      <button v-else class="btn btn-disabled" disabled>{{ status.label || '不可操作' }}</button>
+    </view>
+
+    <view v-if="!adminView && !readonlyMode" class="actions">
       <button v-if="isSeller && order.status === 'PENDING_CONFIRM'" class="btn btn-primary" @click="change('confirm')">确认预约</button>
       <button v-if="isSeller && order.status === 'WAIT_MEET'" class="btn btn-primary" @click="change('complete')">确认完成交易</button>
       <button v-if="canCancel" class="btn btn-plain" @click="cancel">取消订单</button>
@@ -54,14 +67,43 @@
       <button class="btn btn-plain" @click="appeal">申诉订单问题</button>
       <button class="btn btn-plain" @click="report">举报交易问题</button>
     </view>
+    <view v-if="closeModal.visible" class="modal-mask" @click="closeCloseModal">
+      <view class="reason-sheet" @click.stop>
+        <view class="sheet-title">异常关闭订单</view>
+        <view class="sheet-sub">订单 #{{ order.id }}</view>
+        <view class="party-row">
+          <view class="party-label">责任方</view>
+          <view class="party-options">
+            <view :class="['party-chip', closeModal.responsibleParty === 'BUYER' ? 'active' : '']" @click="closeModal.responsibleParty = 'BUYER'">买家</view>
+            <view :class="['party-chip', closeModal.responsibleParty === 'SELLER' ? 'active' : '']" @click="closeModal.responsibleParty = 'SELLER'">卖家</view>
+          </view>
+        </view>
+        <view class="reason-list">
+          <view
+            v-for="reason in closeReasons"
+            :key="reason"
+            :class="['reason-chip', closeModal.reason === reason ? 'active' : '']"
+            @click="closeModal.reason = reason"
+          >
+            {{ reason }}
+          </view>
+        </view>
+        <textarea v-model="closeModal.note" class="reason-input" maxlength="200" placeholder="补充说明，可不填" placeholder-class="reason-placeholder" />
+        <view class="sheet-actions">
+          <button class="sheet-button cancel" @click="closeCloseModal">取消</button>
+          <button class="sheet-button confirm" :loading="submitting" @click="submitExceptionClose">确认关闭</button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
 import { onLoad } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import ProductRow from '../../components/ProductRow.vue'
 import StatusBadge from '../../components/StatusBadge.vue'
+import { exceptionCloseAdminOrder } from '../../api/admin'
 import { getPublicProfile } from '../../api/user'
 import { tradeService } from '../../services/trade'
 import { getUser } from '../../utils/auth'
@@ -71,10 +113,18 @@ import { navigate, showError, showSuccess } from '../../utils/navigation'
 
 const order = ref()
 const sellerProfile = ref(null)
+const adminView = ref(false)
+const readonlyMode = ref(false)
+const relatedType = ref('')
+const relatedId = ref('')
+const submitting = ref(false)
+const closeModal = reactive({ visible: false, reason: '', note: '', responsibleParty: 'SELLER' })
+const closeReasons = ['买卖双方协商取消', '交易存在纠纷', '商品违规或信息异常', '长时间未完成交易', '其他原因']
 const currentUserId = computed(() => String(getUser()?.id || ''))
 const status = computed(() => ORDER_STATUS[order.value?.status] || { label: '', tone: 'muted' })
 const isSeller = computed(() => String(order.value?.sellerId) === currentUserId.value)
 const canCancel = computed(() => ['PENDING_CONFIRM', 'WAIT_MEET'].includes(order.value?.status))
+const canAdminExceptionClose = computed(() => ['PENDING_CONFIRM', 'WAIT_MEET'].includes(order.value?.status))
 const sellerId = computed(() => order.value?.sellerId || order.value?.seller?.id || '')
 const sellerName = computed(() => (
   sellerProfile.value?.nickname
@@ -103,12 +153,16 @@ const statusTip = computed(() => ({
 let id = ''
 onLoad((options) => {
   id = options.id
+  adminView.value = options.adminView === '1' || options.adminView === 1
+  readonlyMode.value = options.readonly === '1' || options.readonly === 1
+  relatedType.value = String(options.relatedType || '').toUpperCase()
+  relatedId.value = options.relatedId || ''
   load()
 })
 
 async function load() {
   try {
-    const detail = await tradeService.getOrder(id)
+    const detail = adminView.value ? await tradeService.getAdminOrder(id) : await tradeService.getOrder(id)
     if (detail?.product?.id && !detail.product.image) {
       try {
         const product = await tradeService.getProduct(detail.product.id)
@@ -151,6 +205,51 @@ function cancel() {
   })
 }
 
+function openCloseModal() {
+  closeModal.visible = true
+  closeModal.reason = ''
+  closeModal.note = ''
+  closeModal.responsibleParty = 'SELLER'
+}
+
+function closeCloseModal() {
+  if (submitting.value) return
+  closeModal.visible = false
+}
+
+function buildCloseReason() {
+  const note = String(closeModal.note || '').trim()
+  return note ? `${closeModal.reason}。补充说明：${note}` : closeModal.reason
+}
+
+async function submitExceptionClose() {
+  if (!canAdminExceptionClose.value) return
+  if (!closeModal.reason) {
+    showError(new Error('请选择关闭原因'))
+    return
+  }
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    const payload = {
+      reason: buildCloseReason(),
+      responsibleParty: closeModal.responsibleParty
+    }
+    if (relatedType.value && relatedId.value) {
+      payload.relatedType = relatedType.value
+      payload.relatedId = Number(relatedId.value)
+    }
+    await exceptionCloseAdminOrder(id, payload)
+    showSuccess('已异常关闭')
+    closeModal.visible = false
+    await load()
+  } catch (error) {
+    showError(error)
+  } finally {
+    submitting.value = false
+  }
+}
+
 function review() {
   if (hasReviewed.value) return
   navigate('/pages/interaction/review', { orderId: id })
@@ -164,7 +263,10 @@ function openProduct() {
   }
   navigate('/pages/detail/detail', {
     id: productId,
-    readonly: order.value?.status === 'COMPLETED' ? 1 : 0,
+    readonly: adminView.value || readonlyMode.value || order.value?.status === 'COMPLETED' ? 1 : 0,
+    adminView: adminView.value ? 1 : '',
+    relatedType: relatedType.value,
+    relatedId: relatedId.value,
     snapshotTitle: order.value?.product?.title || order.value?.productTitleSnapshot || '',
     snapshotPrice: order.value?.product?.price || order.value?.productPriceSnapshot || '',
     snapshotImage: order.value?.product?.image || order.value?.productImage || '',
@@ -276,6 +378,131 @@ function appeal() {
 .actions .btn {
   box-sizing: border-box;
   min-width: 0;
+}
+
+.admin-actions {
+  margin-bottom: 20rpx;
+}
+
+.btn-danger {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+.btn-disabled {
+  color: #8a9690;
+  background: #eef2f6;
+}
+
+.modal-mask {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  top: 0;
+  z-index: 99;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(15, 23, 42, .42);
+}
+
+.reason-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 30rpx 28rpx 36rpx;
+  border-radius: 28rpx 28rpx 0 0;
+  background: #fff;
+}
+
+.sheet-title {
+  color: #1f2933;
+  font-size: 34rpx;
+  font-weight: 700;
+}
+
+.sheet-sub {
+  margin-top: 8rpx;
+  color: #98a2b3;
+  font-size: 24rpx;
+}
+
+.party-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 24rpx;
+}
+
+.party-label {
+  color: #475467;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.party-options,
+.reason-list,
+.sheet-actions {
+  display: flex;
+  gap: 14rpx;
+}
+
+.party-chip,
+.reason-chip {
+  padding: 12rpx 24rpx;
+  border: 2rpx solid transparent;
+  border-radius: 999rpx;
+  background: #f8fafc;
+  color: #667085;
+  font-size: 24rpx;
+}
+
+.party-chip.active,
+.reason-chip.active {
+  border-color: #17a84b;
+  background: #f0fdf4;
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.reason-list {
+  flex-wrap: wrap;
+  margin-top: 24rpx;
+}
+
+.reason-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 150rpx;
+  margin-top: 22rpx;
+  padding: 18rpx;
+  border-radius: 14rpx;
+  background: #f8fafc;
+  color: #1f2933;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.sheet-actions {
+  margin-top: 24rpx;
+}
+
+.sheet-button {
+  flex: 1;
+  height: 76rpx;
+  border-radius: 14rpx;
+  font-size: 26rpx;
+  line-height: 76rpx;
+}
+
+.sheet-button.cancel {
+  color: #667085;
+  background: #f2f4f7;
+}
+
+.sheet-button.confirm {
+  color: #fff;
+  background: #17a84b;
 }
 
 .seller-card {

@@ -13,8 +13,15 @@
         </view>
       </view>
       <view class="actions">
-        <button v-if="!isSelf" class="chat-btn" @click="chatWithUser">聊一聊</button>
-        <button class="report-btn" @click="reportUser">举报该用户</button>
+        <template v-if="adminView">
+          <button v-if="accountStatus === 'NORMAL'" class="disable-btn" @click="changeUserStatus('DISABLED')">禁用</button>
+          <button v-if="accountStatus === 'NORMAL' || accountStatus === 'DISABLED'" class="ban-btn" @click="changeUserStatus('BANNED')">封禁</button>
+          <button v-if="canRecoverUser" class="recover-btn" @click="changeUserStatus('NORMAL')">恢复</button>
+        </template>
+        <template v-else>
+          <button v-if="!isSelf" class="chat-btn" @click="chatWithUser">聊一聊</button>
+          <button class="report-btn" @click="reportUser">举报该用户</button>
+        </template>
       </view>
     </view>
 
@@ -58,6 +65,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { getPublicProfile } from '../../api/user'
+import { getAdminUserDetail, updateAdminUserStatus } from '../../api/admin'
 import { listProducts } from '../../api/product'
 import { createOrGetConversation } from '../../api/chat'
 import { getUser } from '../../utils/auth'
@@ -65,9 +73,13 @@ import { BASE_URL } from '../../utils/request'
 import { navigate, showError } from '../../utils/navigation'
 
 const userId = ref('')
+const adminView = ref(false)
+const relatedType = ref('')
+const relatedId = ref('')
 const preferredProductId = ref('')
 const preferredProductTitle = ref('')
 const profile = ref(null)
+const adminUser = ref(null)
 const products = ref([])
 const reviews = ref([])
 
@@ -75,6 +87,10 @@ const currentUserId = computed(() => getUser()?.id || getUser()?.userId || '')
 const isSelf = computed(() => String(userId.value) === String(currentUserId.value))
 const displayName = computed(() => profile.value?.nickname || 'CAU 同学')
 const avatarUrl = computed(() => normalizeImage(profile.value?.avatarUrl))
+const accountStatus = computed(() => adminUser.value?.accountStatus || (profile.value?.tradeAvailable ? 'NORMAL' : 'DISABLED'))
+const currentUserRole = computed(() => String(getUser()?.role || '').toUpperCase())
+const isSuperAdmin = computed(() => currentUserRole.value === 'SUPER_ADMIN')
+const canRecoverUser = computed(() => accountStatus.value === 'DISABLED' || (accountStatus.value === 'BANNED' && isSuperAdmin.value))
 
 function normalizeImage(url) {
   if (!url) return ''
@@ -110,8 +126,22 @@ function loadLocalReviews() {
   reviews.value = Array.isArray(list) ? list : []
 }
 
+function profileFromAdminUser(user) {
+  if (!user) return null
+  return {
+    id: user.id,
+    nickname: user.nickname,
+    avatarUrl: user.avatarUrl,
+    authStatus: user.authStatus,
+    tradeAvailable: user.accountStatus === 'NORMAL'
+  }
+}
+
 onLoad(async (options) => {
   userId.value = options.id || ''
+  adminView.value = options.adminView === '1' || options.adminView === 1
+  relatedType.value = String(options.relatedType || '').toUpperCase()
+  relatedId.value = options.relatedId || ''
   preferredProductId.value = options.productId || ''
   preferredProductTitle.value = options.productTitle ? decodeURIComponent(options.productTitle) : ''
   if (!userId.value) {
@@ -119,8 +149,13 @@ onLoad(async (options) => {
     return
   }
   try {
-    const data = await getPublicProfile(userId.value)
-    profile.value = data
+    if (adminView.value) {
+      const detail = await getAdminUserDetail(userId.value).catch(() => null)
+      adminUser.value = detail?.user || null
+      profile.value = await getPublicProfile(userId.value).catch(() => profileFromAdminUser(adminUser.value))
+    } else {
+      profile.value = await getPublicProfile(userId.value)
+    }
     await loadProducts()
     loadLocalReviews()
   } catch (error) {
@@ -140,6 +175,46 @@ function reportUser() {
   }
   navigate('/pages/interaction/report', { targetType: 'USER', targetId: userId.value })
 }
+
+function accountText(status) {
+  return { NORMAL: '恢复', DISABLED: '禁用', BANNED: '封禁' }[status] || status
+}
+
+function changeUserStatus(status) {
+  const action = accountText(status)
+  uni.showModal({
+    title: `${action}用户`,
+    editable: true,
+    placeholderText: '请输入处理原因',
+    success: async (res) => {
+      if (!res.confirm) return
+      const reason = (res.content || '').trim()
+      if (!reason) {
+        uni.showToast({ title: '请填写处理原因', icon: 'none' })
+        return
+      }
+      try {
+        const payload = { accountStatus: status, reason }
+        if (relatedType.value && relatedId.value) {
+          payload.relatedType = relatedType.value
+          payload.relatedId = Number(relatedId.value)
+        }
+        await updateAdminUserStatus(userId.value, payload)
+        const detail = await getAdminUserDetail(userId.value).catch(() => null)
+        adminUser.value = detail?.user || adminUser.value
+        if (status === 'NORMAL') {
+          profile.value = { ...profile.value, tradeAvailable: true }
+        } else {
+          profile.value = { ...profile.value, tradeAvailable: false }
+        }
+        uni.showToast({ title: '操作成功', icon: 'success' })
+      } catch (error) {
+        uni.showToast({ title: error.message || '操作失败', icon: 'none' })
+      }
+    }
+  })
+}
+
 async function chatWithUser() {
   const product = preferredProductId.value
     ? { id: preferredProductId.value, title: preferredProductTitle.value || products.value[0]?.title || '商品咨询' }
@@ -181,9 +256,12 @@ async function chatWithUser() {
 .tag { padding: 8rpx 16rpx; border-radius: 999rpx; background: #edf6f1; color: #23734f; font-size: 23rpx; }
 .tag.danger { background: #fff1ef; color: #d85c45; }
 .actions { display: flex; gap: 16rpx; margin-top: 28rpx; }
-.chat-btn, .report-btn { flex: 1; height: 72rpx; border-radius: 999rpx; font-size: 26rpx; line-height: 72rpx; }
+.chat-btn, .report-btn, .disable-btn, .ban-btn, .recover-btn { flex: 1; height: 72rpx; border-radius: 999rpx; font-size: 26rpx; line-height: 72rpx; }
 .chat-btn { background: #23734f; color: #fff; }
 .report-btn { background: #fff1ef; color: #d85c45; }
+.disable-btn { background: #fff7e6; color: #a96500; }
+.ban-btn { background: #fff1f2; color: #ef4444; }
+.recover-btn { background: #e7f4ec; color: #23734f; }
 .section { margin-top: 22rpx; padding: 26rpx; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20rpx; }
 .section-title { color: #202124; font-size: 31rpx; font-weight: 800; }
